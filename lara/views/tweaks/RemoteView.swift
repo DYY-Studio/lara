@@ -657,3 +657,469 @@ struct RemoteView: View {
         return value
     }
 }
+
+private enum RemoteCallLabActionMode: Int {
+    case inventoryOnly = 1
+    case restoreOnly = 2
+    case createThreadOnly = 3
+
+    var title: String {
+        switch self {
+        case .inventoryOnly:
+            return "Inventory"
+        case .restoreOnly:
+            return "Restore Only"
+        case .createThreadOnly:
+            return "Create Thread Only"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .inventoryOnly:
+            return "Install guards, wait for FIRST_LANDING, log, restore, and exit."
+        case .restoreOnly:
+            return "Add classification and restore decisions, but do not create a call thread."
+        case .createThreadOnly:
+            return "If landing is acceptable, create a dedicated call thread, restore the original thread, and stop."
+        }
+    }
+}
+
+struct RemoteCallLabView: View {
+    @ObservedObject private var mgr = laramgr.shared
+    @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
+    @AppStorage("lara.rc.lab.includeFirstQueueThread") private var includeFirstQueueThread: Bool = false
+    @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
+    @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
+    @State private var query: String = ""
+    @State private var apps: [InstalledUserApp] = []
+    @State private var selectedAppID: String?
+    @State private var launchRunning: Bool = false
+
+    private var filteredApps: [InstalledUserApp] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return apps }
+        let lowered = trimmed.lowercased()
+        return apps.filter {
+            $0.displayName.lowercased().contains(lowered) ||
+            $0.bundleID.lowercased().contains(lowered) ||
+            $0.executable.lowercased().contains(lowered)
+        }
+    }
+
+    private var selectedApp: InstalledUserApp? {
+        guard let selectedAppID else { return nil }
+        return apps.first { $0.id == selectedAppID }
+    }
+
+    private var offsetInfo: [AnyHashable: Any] {
+        RemoteCall.currentIOS16LabOffsetInfo()
+    }
+
+    private var offsetsReady: Bool {
+        offsetInfo["ready"] as? Bool ?? false
+    }
+
+    var body: some View {
+        List {
+            statusSection
+            targetSection
+            offsetsSection
+            appSwitchingSection
+            armSection
+            sessionSummarySection
+        }
+        .navigationTitle("RemoteCall Lab")
+        .onAppear {
+            maxTestThreads = min(max(maxTestThreads, 1), 32)
+            refreshApps()
+            mgr.refreshRemoteCallLabOffsetInfo()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            mgr.refreshRemoteCallLabOffsetInfo()
+            if mgr.sbxready && !launchRunning {
+                refreshApps()
+            }
+        }
+        .onChange(of: mgr.sbxready) { ready in
+            if ready {
+                refreshApps()
+            } else {
+                apps.removeAll()
+                selectedAppID = nil
+            }
+        }
+        .onChange(of: threadCpuDataOffsetOverride) { _ in
+            mgr.refreshRemoteCallLabOffsetInfo()
+        }
+        .onChange(of: activeThreadOffsetOverride) { _ in
+            mgr.refreshRemoteCallLabOffsetInfo()
+        }
+    }
+
+    @ViewBuilder
+    private var statusSection: some View {
+        Section(header: HeaderLabel(text: "Status", icon: "waveform.path.ecg")) {
+            if !mgr.dsready {
+                Text("Kernel read/write is required before using RemoteCall Lab.")
+                    .foregroundColor(.secondary)
+            }
+            if !mgr.sbxready {
+                Text("Sandbox escape is required to enumerate and launch ordinary apps.")
+                    .foregroundColor(.secondary)
+            }
+
+            Text(mgr.labStatus.isEmpty ? "Idle." : mgr.labStatus)
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+
+            HStack {
+                Text("Offsets Ready")
+                Spacer()
+                Image(systemName: offsetsReady ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundColor(offsetsReady ? .green : .red)
+            }
+
+            HStack {
+                Text("Lab Session")
+                Spacer()
+                Text(mgr.labRunning ? "Running" : (mgr.labArmed ? "Armed" : "Idle"))
+                    .foregroundColor(mgr.labRunning || mgr.labArmed ? .orange : .secondary)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var targetSection: some View {
+        Section(header: HeaderLabel(text: "Target App", icon: "app.badge")) {
+            HStack {
+                TextField("Search apps", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button(action: refreshApps) {
+                    Text("Refresh Apps")
+                }
+                .disabled(!mgr.sbxready || launchRunning || mgr.labRunning)
+            }
+
+            if let selectedApp {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(selectedApp.displayName)
+                        .font(.headline)
+                    Text(selectedApp.bundleID)
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                    Text(selectedApp.executable)
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Text(filteredApps.isEmpty ? "No installed apps available." : "Select a target app below.")
+                    .foregroundColor(.secondary)
+            }
+
+            if filteredApps.isEmpty {
+                Text(query.isEmpty ? "No apps loaded." : "No matching apps.")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(filteredApps) { app in
+                    Button {
+                        selectedAppID = app.id
+                    } label: {
+                        RemoteCallLabAppRow(app: app, isSelected: selectedAppID == app.id)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var offsetsSection: some View {
+        Section(
+            header: HeaderLabel(text: "Offsets", icon: "cpu"),
+            footer: Text(offsetSummaryText)
+                .font(.system(.footnote, design: .monospaced))
+                .textSelection(.enabled)
+        ) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(offsetDescription(
+                    value: offsetInfo["threadCpuDataOffset"],
+                    source: offsetInfo["threadCpuDataSource"],
+                    label: "thread -> CPUData*"
+                ))
+                Text(offsetDescription(
+                    value: offsetInfo["activeThreadOffset"],
+                    source: offsetInfo["activeThreadSource"],
+                    label: "CPUData -> active_thread"
+                ))
+            }
+            .font(.system(.footnote, design: .monospaced))
+            .foregroundColor(.secondary)
+
+            TextField("thread -> CPUData* override (hex)", text: $threadCpuDataOffsetOverride)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(.body, design: .monospaced))
+
+            TextField("CPUData -> active_thread override (hex)", text: $activeThreadOffsetOverride)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(.body, design: .monospaced))
+
+            Stepper(value: $maxTestThreads, in: 1...32) {
+                HStack {
+                    Text("Max Test Threads")
+                    Spacer()
+                    Text("\(maxTestThreads)")
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            Toggle("Include First Queue Thread", isOn: $includeFirstQueueThread)
+
+            Button("Clear Manual Overrides") {
+                threadCpuDataOffsetOverride = ""
+                activeThreadOffsetOverride = ""
+                mgr.refreshRemoteCallLabOffsetInfo()
+            }
+            .disabled(manualOverridesAreEmpty)
+
+            Button("Probe Offsets") {
+                mgr.probeRemoteCallLabOffsets()
+            }
+            .disabled(!mgr.dsready || mgr.labRunning || mgr.labArmed)
+        }
+    }
+
+    @ViewBuilder
+    private var appSwitchingSection: some View {
+        Section(
+            header: HeaderLabel(text: "App Switching", icon: "arrow.left.arrow.right"),
+            footer: Text("Use Launch Target for cold-start/warm-start and automatic return to Lara before arming. After Arm succeeds, switch manually to the target app to trigger thread activity.")
+        ) {
+            Button("Launch Target") {
+                guard let selectedApp else { return }
+                launchTargetAndReturn(app: selectedApp)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning)
+
+            Button("Return to Lara") {
+                returnToLara()
+            }
+            .disabled(launchRunning || mgr.labRunning)
+
+            Button("Open Target App") {
+                guard let selectedApp else { return }
+                openTargetApp(app: selectedApp)
+            }
+            .disabled(selectedApp == nil || launchRunning)
+        }
+    }
+
+    @ViewBuilder
+    private var armSection: some View {
+        Section(
+            header: HeaderLabel(text: "Arm Lab", icon: "syringe"),
+            footer: VStack(alignment: .leading, spacing: 4) {
+                ForEach(labModes, id: \.rawValue) { mode in
+                    Text("\(mode.title): \(mode.description)")
+                }
+            }
+        ) {
+            Button("Arm Inventory") {
+                armLab(.inventoryOnly)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed)
+
+            Button("Arm Restore Only") {
+                armLab(.restoreOnly)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed)
+
+            Button("Arm Create Thread Only") {
+                armLab(.createThreadOnly)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed)
+
+            Button("Disarm Session") {
+                mgr.disarmRemoteCallLab()
+            }
+            .disabled(!mgr.labArmed && !mgr.labRunning)
+        }
+    }
+
+    @ViewBuilder
+    private var sessionSummarySection: some View {
+        if !mgr.labReport.isEmpty {
+            Section(header: HeaderLabel(text: "Session Summary", icon: "doc.text")) {
+                Text(mgr.labReport)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var labModes: [RemoteCallLabActionMode] {
+        [.inventoryOnly, .restoreOnly, .createThreadOnly]
+    }
+
+    private var manualOverridesAreEmpty: Bool {
+        threadCpuDataOffsetOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            activeThreadOffsetOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var offsetSummaryText: String {
+        if mgr.labOffsetSummary.isEmpty {
+            return "Probe results are written to rc.lab logs. Manual overrides require both offsets."
+        }
+        return mgr.labOffsetSummary
+    }
+
+    private func refreshApps() {
+        guard mgr.sbxready else {
+            apps.removeAll()
+            selectedAppID = nil
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loadedApps = InstalledUserAppCatalog.loadApps()
+            DispatchQueue.main.async {
+                self.apps = loadedApps
+                if let selectedAppID, loadedApps.contains(where: { $0.id == selectedAppID }) {
+                    return
+                }
+                self.selectedAppID = loadedApps.first?.id
+            }
+        }
+    }
+
+    private func armLab(_ mode: RemoteCallLabActionMode) {
+        guard let selectedApp,
+              let rcMode = RCInitMode(rawValue: mode.rawValue) else { return }
+        mgr.startRemoteCallLab(app: selectedApp, mode: rcMode)
+    }
+
+    private func openTargetApp(app: InstalledUserApp) {
+        guard !app.bundleID.isEmpty else {
+            mgr.labStatus = "Target app has no bundle identifier."
+            return
+        }
+        let ret = launch_app(app.bundleID)
+        if ret == 0 {
+            mgr.labStatus = "Opened \(app.displayName)."
+        } else {
+            mgr.labStatus = "Failed to open \(app.displayName)."
+        }
+    }
+
+    private func returnToLara() {
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            mgr.labStatus = "Current app bundle identifier is unavailable."
+            return
+        }
+        let ret = launch_app(bundleID)
+        if ret == 0 {
+            mgr.labStatus = "Returned to Lara."
+        } else {
+            mgr.labStatus = "Failed to return to Lara."
+        }
+    }
+
+    private func launchTargetAndReturn(app: InstalledUserApp) {
+        guard !app.bundleID.isEmpty else {
+            mgr.labStatus = "Target app has no bundle identifier."
+            return
+        }
+        guard let laraBundleID = Bundle.main.bundleIdentifier else {
+            mgr.labStatus = "Current app bundle identifier is unavailable."
+            return
+        }
+
+        launchRunning = true
+        mgr.labStatus = "Launching \(app.displayName) and returning to Lara..."
+
+        var bgTask: UIBackgroundTaskIdentifier = .invalid
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "RemoteCallLabLaunch") {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let launchRet = launch_app(app.bundleID)
+            if launchRet == 0 {
+                usleep(2500000)
+                _ = launch_app(laraBundleID)
+                usleep(500000)
+            }
+            let pid = find_process_pid(app.executable)
+
+            DispatchQueue.main.async {
+                self.launchRunning = false
+                if bgTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTask)
+                    bgTask = .invalid
+                }
+                if launchRet != 0 {
+                    self.mgr.labStatus = "Failed to launch \(app.displayName)."
+                    return
+                }
+                if pid > 0 {
+                    self.mgr.labStatus = "Target ready: \(app.displayName) pid=\(pid). You can arm the Lab session now."
+                } else {
+                    self.mgr.labStatus = "Target launch finished, but pid lookup failed. Open it manually and retry."
+                }
+            }
+        }
+    }
+
+    private func offsetDescription(value: Any?, source: Any?, label: String) -> String {
+        let number = value as? NSNumber
+        let sourceText = source as? String ?? "unknown"
+        let hex = number.map { String(format: "0x%x", $0.uint32Value) } ?? "(unset)"
+        return "\(label): \(hex) [\(sourceText)]"
+    }
+}
+
+private struct RemoteCallLabAppRow: View {
+    let app: InstalledUserApp
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let icon = app.icon {
+                Image(uiImage: icon)
+                    .resizable()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Image(systemName: "app.fill")
+                    .frame(width: 36, height: 36)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.displayName)
+                    .foregroundColor(.primary)
+                Text(app.bundleID)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                Text(app.executable)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.accentColor)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}

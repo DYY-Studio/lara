@@ -33,6 +33,8 @@ struct TweaksView: View {
                         .disabled(!mgr.vfsready)
                     NavigationLink("App Decrypt", destination: DecryptView())
                         .disabled(!mgr.sbxready)
+                    NavigationLink("RemoteCall Lab", destination: RemoteCallLabView())
+                        .disabled(!mgr.sbxready)
                     NavigationLink("3 App Bypass", destination: AppsView())
                         .disabled(!mgr.sbxready)
                     NavigationLink("Unblacklist", destination: WhitelistView())

@@ -12,6 +12,10 @@ import notify
 import UIKit
 import WebKit
 
+private struct LaraPropertyListError: Error {
+    let message: String
+}
+
 private func loadMutablePropertyListDictionary(from url: URL) throws -> NSMutableDictionary {
     let data = try Data(contentsOf: url)
     var format = PropertyListSerialization.PropertyListFormat.binary
@@ -21,9 +25,72 @@ private func loadMutablePropertyListDictionary(from url: URL) throws -> NSMutabl
         format: &format
     )
     guard let dict = plist as? NSMutableDictionary else {
-        throw "Property list root is not a dictionary."
+        throw LaraPropertyListError(message: "Property list root is not a dictionary.")
     }
     return dict
+}
+
+struct InstalledUserApp: Identifiable {
+    let id: String
+    let displayName: String
+    let bundleID: String
+    let bundlePath: String
+    let executable: String
+    let icon: UIImage?
+}
+
+enum InstalledUserAppCatalog {
+    static func loadApps() -> [InstalledUserApp] {
+        let bundleFolder = "/private/var/containers/Bundle/Application"
+        let fm = FileManager.default
+        guard let bundles = try? fm.contentsOfDirectory(atPath: bundleFolder) else {
+            return []
+        }
+
+        var results: [InstalledUserApp] = []
+        for bundle in bundles {
+            let appPath = bundleFolder + "/" + bundle
+            guard let contents = try? fm.contentsOfDirectory(atPath: appPath) else { continue }
+            for item in contents where item.hasSuffix(".app") {
+                let fullAppPath = appPath + "/" + item
+                let infoPath = fullAppPath + "/Info.plist"
+                guard let info = NSDictionary(contentsOfFile: infoPath) else { continue }
+
+                let executable = info["CFBundleExecutable"] as? String ?? ""
+                if executable.isEmpty { continue }
+
+                let bundleID = info["CFBundleIdentifier"] as? String ?? ""
+                let displayName = (info["CFBundleDisplayName"] as? String) ??
+                    (info["CFBundleName"] as? String) ??
+                    (item as NSString).deletingPathExtension
+
+                results.append(InstalledUserApp(
+                    id: fullAppPath,
+                    displayName: displayName,
+                    bundleID: bundleID,
+                    bundlePath: fullAppPath,
+                    executable: executable,
+                    icon: loadIcon(info: info, fullAppPath: fullAppPath)
+                ))
+                break
+            }
+        }
+
+        return results.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private static func loadIcon(info: NSDictionary, fullAppPath: String) -> UIImage? {
+        if let icons = info["CFBundleIcons"] as? [String: Any],
+           let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let iconFiles = primary["CFBundleIconFiles"] as? [String],
+           let iconName = iconFiles.last {
+            let basePath = fullAppPath + "/" + iconName
+            if let image = UIImage(contentsOfFile: basePath) { return image }
+            if let image = UIImage(contentsOfFile: basePath + "@2x.png") { return image }
+            if let image = UIImage(contentsOfFile: basePath + ".png") { return image }
+        }
+        return UIImage(named: "unknown")
+    }
 }
 
 private func clearImmutableForOverwriteIfNeeded(path: String) -> String? {
@@ -73,6 +140,11 @@ final class laramgr: ObservableObject {
     @Published var eu2progress: Double = 0.0
     @Published var eu2running: Bool = false
     @Published var rcLastError: String?
+    @Published var labArmed: Bool = false
+    @Published var labRunning: Bool = false
+    @Published var labStatus: String = ""
+    @Published var labReport: String = ""
+    @Published var labOffsetSummary: String = ""
     #endif
     
     @Published var vfsready: Bool = false
@@ -92,6 +164,8 @@ final class laramgr: ObservableObject {
     @Published var showLogs: Bool = false
     
     var sbProc: RemoteCall?
+    var labProc: RemoteCall?
+    var labKeepAliveTask: UIBackgroundTaskIdentifier = .invalid
     var ytProc = RemoteCall(process: "youtube", useMigFilterBypass: false)
     
     static let shared = laramgr()
@@ -685,6 +759,282 @@ final class laramgr: ObservableObject {
     }
     
     #if !DISABLE_REMOTECALL
+    private func labModeTitle(_ mode: RCInitMode) -> String {
+        switch mode.rawValue {
+        case 1:
+            return "InventoryOnly"
+        case 2:
+            return "RestoreOnly"
+        case 3:
+            return "CreateThreadOnly"
+        default:
+            return "Standard"
+        }
+    }
+
+    private enum LabSessionStateValue {
+        static let none = 0
+        static let preparing = 1
+        static let armedWaiting = 2
+        static let landingReceived = 3
+        static let completed = 4
+        static let createThreadReady = 5
+        static let cancelled = 6
+        static let failed = 7
+    }
+
+    private func labStatusFallback(stateRaw: Int, lastError: String?) -> String {
+        switch stateRaw {
+        case LabSessionStateValue.armedWaiting:
+            return "Armed, waiting for first landing"
+        case LabSessionStateValue.landingReceived:
+            return "Landing received"
+        case LabSessionStateValue.completed:
+            return "Completed"
+        case LabSessionStateValue.createThreadReady:
+            return "Create-thread ready"
+        case LabSessionStateValue.cancelled:
+            return "Cancelled"
+        case LabSessionStateValue.failed:
+            return lastError?.isEmpty == false ? lastError! : "Failed"
+        default:
+            return lastError?.isEmpty == false ? lastError! : "Idle."
+        }
+    }
+
+    private func beginLabKeepAliveIfNeeded() {
+        guard labKeepAliveTask == .invalid else { return }
+        labKeepAliveTask = UIApplication.shared.beginBackgroundTask(withName: "RemoteCallLabKeepAlive") { [weak self] in
+            DispatchQueue.main.async {
+                self?.logmsg("rc.lab keepalive expired")
+                self?.endLabKeepAliveIfNeeded()
+            }
+        }
+    }
+
+    func endLabKeepAliveIfNeeded() {
+        guard labKeepAliveTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(labKeepAliveTask)
+        labKeepAliveTask = .invalid
+    }
+
+    func refreshRemoteCallLabOffsetInfo() {
+        let info = RemoteCall.currentIOS16LabOffsetInfo() ?? [:]
+        let summary = info["summary"] as? String ?? "No probe has been run yet."
+        DispatchQueue.main.async {
+            self.labOffsetSummary = summary
+        }
+    }
+
+    func probeRemoteCallLabOffsets(completion: ((Bool) -> Void)? = nil) {
+        guard dsready else {
+            labStatus = "Probe requires kernel read/write first."
+            completion?(false)
+            return
+        }
+        guard !labRunning else {
+            completion?(false)
+            return
+        }
+
+        labRunning = true
+        labStatus = "Probing iOS >= 16 Lab offsets..."
+        labReport = ""
+        logmsg("rc.lab offset probe requested")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let info = RemoteCall.probeIOS16LabOffsets() ?? [:]
+            let ready = info["ready"] as? Bool ?? false
+            let summary = info["summary"] as? String ?? "Probe finished without a summary."
+            let threadOffset = (info["threadCpuDataOffset"] as? NSNumber)?.uint32Value ?? 0
+            let activeOffset = (info["activeThreadOffset"] as? NSNumber)?.uint32Value ?? 0
+            let threadSource = info["threadCpuDataSource"] as? String ?? "unknown"
+            let activeSource = info["activeThreadSource"] as? String ?? "unknown"
+
+            DispatchQueue.main.async {
+                self.labRunning = false
+                self.labOffsetSummary = summary
+                self.labReport = summary
+                if ready {
+                    self.labStatus = String(
+                        format: "Offsets ready: thread->CPUData=0x%x (%@), active_thread=0x%x (%@).",
+                        threadOffset,
+                        threadSource,
+                        activeOffset,
+                        activeSource
+                    )
+                    self.logmsg(String(
+                        format: "rc.lab offset probe ready thread->CPUData=0x%x (%@) active_thread=0x%x (%@)",
+                        threadOffset,
+                        threadSource,
+                        activeOffset,
+                        activeSource
+                    ))
+                } else {
+                    self.labStatus = "Offset probe failed. Check rc.lab logs or provide manual overrides."
+                    self.logmsg("rc.lab offset probe failed")
+                }
+                completion?(ready)
+            }
+        }
+    }
+
+    func startRemoteCallLab(app: InstalledUserApp, mode: RCInitMode, migbypass: Bool = false, completion: ((Bool) -> Void)? = nil) {
+        guard dsready else {
+            labStatus = "RemoteCall Lab requires kernel read/write first."
+            completion?(false)
+            return
+        }
+        guard sbxready else {
+            labStatus = "RemoteCall Lab requires sandbox escape for app inventory and launch."
+            completion?(false)
+            return
+        }
+        guard !labRunning, labProc == nil else {
+            labStatus = "A Lab session is already active."
+            completion?(false)
+            return
+        }
+
+        let pid = find_process_pid(app.executable)
+        guard pid > 0 else {
+            labStatus = "Target process is not running. Launch the target first."
+            completion?(false)
+            return
+        }
+
+        let modeTitle = labModeTitle(mode)
+        labRunning = true
+        labArmed = true
+        labStatus = "Arming \(modeTitle) for \(app.displayName)..."
+        labReport = ""
+        rcLastError = nil
+        beginLabKeepAliveIfNeeded()
+        logmsg("rc.lab arm requested mode=\(modeTitle) process=\(app.executable) pid=\(pid)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let proc = RemoteCall(process: app.executable, useMigFilterBypass: migbypass, mode: mode)
+            let report = proc?.sessionReport ?? RemoteCall.lastSessionReport() ?? ""
+            let initError = proc?.lastError ?? RemoteCall.lastInitError()
+
+            DispatchQueue.main.async {
+                self.refreshRemoteCallLabOffsetInfo()
+
+                guard let proc else {
+                    self.labRunning = false
+                    self.labProc = nil
+                    self.labArmed = false
+                    self.labReport = report
+                    self.rcLastError = initError
+                    self.endLabKeepAliveIfNeeded()
+                    if let initError, !initError.isEmpty {
+                        self.labStatus = initError
+                        self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
+                    } else {
+                        self.labStatus = "RemoteCall Lab failed for \(app.displayName)."
+                        self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable)")
+                    }
+                    completion?(false)
+                    return
+                }
+
+                self.labRunning = false
+                self.labProc = proc
+                self.labArmed = true
+                self.labReport = report
+                self.rcLastError = initError
+                let armedStatusValue = proc.labSessionStatusText ?? ""
+                let armedStatus = armedStatusValue.isEmpty
+                    ? "Armed, waiting for first landing"
+                    : armedStatusValue
+                self.labStatus = armedStatus
+                self.logmsg("rc.lab armed mode=\(modeTitle) process=\(app.executable) state=\(proc.labSessionState.rawValue)")
+                completion?(true)
+
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let finalState = proc.awaitLabSession().rawValue
+                    let finalReport = proc.sessionReport ?? ""
+                    let finalStatus = proc.labSessionStatusText ?? ""
+                    let finalError = proc.lastError
+
+                    DispatchQueue.main.async {
+                        self.labReport = finalReport
+                        self.rcLastError = finalError
+                        self.labStatus = finalStatus.isEmpty
+                            ? self.labStatusFallback(stateRaw: finalState, lastError: finalError)
+                            : finalStatus
+
+                        if finalState == LabSessionStateValue.createThreadReady {
+                            self.labProc = proc
+                            self.labArmed = true
+                            self.labRunning = false
+                            self.beginLabKeepAliveIfNeeded()
+                            self.logmsg("rc.lab create-thread ready mode=\(modeTitle) process=\(app.executable)")
+                        } else {
+                            if self.labProc === proc {
+                                self.labProc = nil
+                            }
+                            self.labArmed = false
+                            self.labRunning = false
+                            self.endLabKeepAliveIfNeeded()
+                            self.logmsg("rc.lab session ended mode=\(modeTitle) process=\(app.executable) state=\(finalState)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func disarmRemoteCallLab(completion: (() -> Void)? = nil) {
+        if labRunning && labProc == nil {
+            labStatus = "Cancelling Lab session..."
+            logmsg("rc.lab cancel requested")
+            RemoteCall.cancelActiveLabSession()
+            completion?()
+            return
+        }
+
+        guard let proc = labProc else {
+            labArmed = false
+            labStatus = "No active Lab session."
+            endLabKeepAliveIfNeeded()
+            completion?()
+            return
+        }
+
+        let stateRaw = proc.labSessionState.rawValue
+        if stateRaw == LabSessionStateValue.createThreadReady {
+            labRunning = true
+            labStatus = "Disarming Lab session..."
+            logmsg("rc.lab disarm requested")
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                proc.destroy()
+                let report = proc.sessionReport ?? ""
+
+                DispatchQueue.main.async {
+                    if self.labProc === proc {
+                        self.labProc = nil
+                    }
+                    self.labRunning = false
+                    self.labArmed = false
+                    self.labReport = report
+                    self.labStatus = "Lab session disarmed."
+                    self.endLabKeepAliveIfNeeded()
+                    self.logmsg("rc.lab session disarmed")
+                    completion?()
+                }
+            }
+            return
+        }
+
+        labRunning = true
+        labStatus = "Cancelling Lab session..."
+        logmsg("rc.lab cancel requested")
+        RemoteCall.cancelActiveLabSession()
+        completion?()
+    }
+
     func rcinit(process: String, migbypass: Bool = false, completion: ((Bool) -> Void)? = nil) {
         guard dsready, !rcready else {
             completion?(false)

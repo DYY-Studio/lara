@@ -120,7 +120,9 @@ struct lara: App {
         switch phase {
         case .inactive, .background:
             handlebg()
-            globallogger.stopcapture()
+            if !mgr.labArmed {
+                globallogger.stopcapture()
+            }
 
         case .active:
             globallogger.capture()
@@ -132,6 +134,10 @@ struct lara: App {
     }
 
     private func handlebg() {
+        if mgr.labArmed {
+            return
+        }
+
         guard mgr.rcready else { return }
         let keepSpringBoardRemoteCallAlive = UserDefaults.standard.bool(forKey: "keepSpringBoardRemoteCallAliveIOS16")
         if isIOS16() && keepSpringBoardRemoteCallAlive {

@@ -111,58 +111,27 @@ struct DecryptView: View {
     func loadApps() {
         guard mgr.sbxready else { return }
         DispatchQueue.global(qos: .userInitiated).async {
-            var results: [DecryptApp] = []
-            let bundleFolder = "/private/var/containers/Bundle/Application"
-
-            guard let bundles = try? FileManager.default.contentsOfDirectory(atPath: bundleFolder) else {
-                DispatchQueue.main.async { apps.removeAll() }
-                return
-            }
-
-            for bundle in bundles {
-                let appPath = bundleFolder + "/" + bundle
-                guard let contents = try? FileManager.default.contentsOfDirectory(atPath: appPath) else { continue }
-                for item in contents {
-                    guard item.hasSuffix(".app") else { continue }
-                    let fullAppPath = appPath + "/" + item
-                    let infoPath = fullAppPath + "/Info.plist"
-                    guard let info = NSDictionary(contentsOfFile: infoPath) else { continue }
-
-                    let executable = info["CFBundleExecutable"] as? String ?? ""
-                    if executable.isEmpty { continue }
-                    let bundleid = info["CFBundleIdentifier"] as? String ?? ""
-                    let name = (info["CFBundleDisplayName"] as? String) ??
-                               (info["CFBundleName"] as? String) ??
-                               (item as NSString).deletingPathExtension
-
-                    var icon: UIImage? = nil
-                    if let icons = info["CFBundleIcons"] as? [String: Any],
-                       let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
-                       let iconfiles = primary["CFBundleIconFiles"] as? [String],
-                       let iconname = iconfiles.last {
-                        let iconpath = fullAppPath + "/" + iconname
-                        if let img = UIImage(contentsOfFile: iconpath) { icon = img }
-                        else if let img = UIImage(contentsOfFile: iconpath + "@2x.png") { icon = img }
-                        else if let img = UIImage(contentsOfFile: iconpath + ".png") { icon = img }
-                    }
-
-                    let encResult = is_encrypted(fullAppPath, executable)
-                    let status: DecryptStatus
-                    if encResult > 0 { status = .encrypted }
-                    else if encResult == 0 { status = .unencrypted }
-                    else { status = .unknown }
-
-                    results.append(DecryptApp(
-                        name: name, bundleID: bundleid, bundlePath: fullAppPath,
-                        executable: executable,
-                        icon: icon ?? UIImage(named: "unknown"),
-                        isEncrypted: status
-                    ))
-                    break
+            let results = InstalledUserAppCatalog.loadApps().map { app -> DecryptApp in
+                let encResult = is_encrypted(app.bundlePath, app.executable)
+                let status: DecryptStatus
+                if encResult > 0 {
+                    status = .encrypted
+                } else if encResult == 0 {
+                    status = .unencrypted
+                } else {
+                    status = .unknown
                 }
+
+                return DecryptApp(
+                    name: app.displayName,
+                    bundleID: app.bundleID,
+                    bundlePath: app.bundlePath,
+                    executable: app.executable,
+                    icon: app.icon ?? UIImage(named: "unknown"),
+                    isEncrypted: status
+                )
             }
 
-            results.sort { $0.name.lowercased() < $1.name.lowercased() }
             DispatchQueue.main.async { apps = results }
         }
     }
@@ -405,5 +374,4 @@ struct AppRow: View {
         .opacity(isdecrypting ? 0.6 : 1.0)
     }
 }
-
 
