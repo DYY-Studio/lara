@@ -772,6 +772,10 @@ final class laramgr: ObservableObject {
         }
     }
 
+    private var unsafeCreateThreadExperimentalEnabled: Bool {
+        RemoteCall.ordinaryAppCreateThreadExperimentalEnabled()
+    }
+
     private enum LabSessionStateValue {
         static let none = 0
         static let preparing = 1
@@ -892,6 +896,14 @@ final class laramgr: ObservableObject {
         }
         guard !labRunning, labProc == nil else {
             labStatus = "A Lab session is already active."
+            completion?(false)
+            return
+        }
+        if mode.rawValue == 3 && !unsafeCreateThreadExperimentalEnabled {
+            let message = "CreateThreadOnly is disabled for ordinary apps unless unsafe experimental mode is enabled."
+            labStatus = message
+            rcLastError = message
+            logmsg("rc.lab.create_thread: blocked policy=unsafe-toggle-disabled")
             completion?(false)
             return
         }

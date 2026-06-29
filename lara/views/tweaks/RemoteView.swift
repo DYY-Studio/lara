@@ -681,7 +681,7 @@ private enum RemoteCallLabActionMode: Int {
         case .restoreOnly:
             return "Add classification and restore decisions, but do not create a call thread."
         case .createThreadOnly:
-            return "If landing is acceptable, create a dedicated call thread, restore the original thread, and stop."
+            return "Disabled by default. Enable the unsafe experimental path to attempt create-thread; failures restore immediately and exit."
         }
     }
 }
@@ -690,6 +690,7 @@ struct RemoteCallLabView: View {
     @ObservedObject private var mgr = laramgr.shared
     @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
     @AppStorage("lara.rc.lab.includeFirstQueueThread") private var includeFirstQueueThread: Bool = false
+    @AppStorage("lara.rc.lab.allowUnsafeCreateThreadExperimental") private var allowUnsafeCreateThreadExperimental: Bool = false
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -925,6 +926,7 @@ struct RemoteCallLabView: View {
         Section(
             header: HeaderLabel(text: "Arm Lab", icon: "syringe"),
             footer: VStack(alignment: .leading, spacing: 4) {
+                Text("Create Thread Only is disabled for ordinary apps unless the unsafe experimental path is enabled.")
                 ForEach(labModes, id: \.rawValue) { mode in
                     Text("\(mode.title): \(mode.description)")
                 }
@@ -940,10 +942,12 @@ struct RemoteCallLabView: View {
             }
             .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed)
 
+            Toggle("Allow Unsafe Create Thread Path (Experimental)", isOn: $allowUnsafeCreateThreadExperimental)
+
             Button("Arm Create Thread Only") {
                 armLab(.createThreadOnly)
             }
-            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed)
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowUnsafeCreateThreadExperimental)
 
             Button("Disarm Session") {
                 mgr.disarmRemoteCallLab()
