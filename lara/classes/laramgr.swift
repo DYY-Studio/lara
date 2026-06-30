@@ -767,13 +767,15 @@ final class laramgr: ObservableObject {
             return "RestoreOnly"
         case 3:
             return "CreateThreadOnly"
+        case 4:
+            return "ReturnPathProbeOnly"
         default:
             return "Standard"
         }
     }
 
-    private var unsafeCreateThreadExperimentalEnabled: Bool {
-        RemoteCall.ordinaryAppCreateThreadExperimentalEnabled()
+    private var returnPathProbeExperimentalEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "lara.rc.lab.allowReturnPathProbeExperimental")
     }
 
     private enum LabSessionStateValue {
@@ -899,11 +901,19 @@ final class laramgr: ObservableObject {
             completion?(false)
             return
         }
-        if mode.rawValue == 3 && !unsafeCreateThreadExperimentalEnabled {
-            let message = "CreateThreadOnly is disabled for ordinary apps unless unsafe experimental mode is enabled."
+        if mode.rawValue == 3 {
+            let message = "CreateThreadOnly is temporarily unavailable for ordinary apps pending a signed return-path design."
             labStatus = message
             rcLastError = message
-            logmsg("rc.lab.create_thread: blocked policy=unsafe-toggle-disabled")
+            logmsg("rc.lab.create_thread: blocked policy=ordinary-app-disabled-pending-signed-return-path")
+            completion?(false)
+            return
+        }
+        if mode.rawValue == 4 && !returnPathProbeExperimentalEnabled {
+            let message = "Signed return-path probe is disabled for ordinary apps unless experimental mode is enabled."
+            labStatus = message
+            rcLastError = message
+            logmsg("rc.lab.return_probe: blocked policy=experimental-toggle-disabled")
             completion?(false)
             return
         }

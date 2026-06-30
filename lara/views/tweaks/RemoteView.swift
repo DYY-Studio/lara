@@ -661,7 +661,7 @@ struct RemoteView: View {
 private enum RemoteCallLabActionMode: Int {
     case inventoryOnly = 1
     case restoreOnly = 2
-    case createThreadOnly = 3
+    case returnPathProbeOnly = 4
 
     var title: String {
         switch self {
@@ -669,8 +669,8 @@ private enum RemoteCallLabActionMode: Int {
             return "Inventory"
         case .restoreOnly:
             return "Restore Only"
-        case .createThreadOnly:
-            return "Create Thread Only"
+        case .returnPathProbeOnly:
+            return "Return Path Probe"
         }
     }
 
@@ -680,8 +680,28 @@ private enum RemoteCallLabActionMode: Int {
             return "Install guards, wait for FIRST_LANDING, log, restore, and exit."
         case .restoreOnly:
             return "Add classification and restore decisions, but do not create a call thread."
-        case .createThreadOnly:
-            return "Disabled by default. Enable the unsafe experimental path to attempt create-thread; failures restore immediately and exit."
+        case .returnPathProbeOnly:
+            return "Run one pending-exception ret_gadget probe with a signed return-path strategy, restore, and exit."
+        }
+    }
+}
+
+private enum RemoteCallReturnPathStrategyOption: Int, CaseIterable {
+    case auto = 0
+    case objcTrapBRK = 1
+    case executableMisalign = 2
+    case pacFault = 3
+
+    var title: String {
+        switch self {
+        case .auto:
+            return "Auto"
+        case .objcTrapBRK:
+            return "ObjC BRK"
+        case .executableMisalign:
+            return "Executable Misalign"
+        case .pacFault:
+            return "PAC Fault"
         }
     }
 }
@@ -690,7 +710,8 @@ struct RemoteCallLabView: View {
     @ObservedObject private var mgr = laramgr.shared
     @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
     @AppStorage("lara.rc.lab.includeFirstQueueThread") private var includeFirstQueueThread: Bool = false
-    @AppStorage("lara.rc.lab.allowUnsafeCreateThreadExperimental") private var allowUnsafeCreateThreadExperimental: Bool = false
+    @AppStorage("lara.rc.lab.allowReturnPathProbeExperimental") private var allowReturnPathProbeExperimental: Bool = false
+    @AppStorage("lara.rc.lab.returnPathProbeStrategy") private var returnPathProbeStrategy: Int = 0
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -734,6 +755,9 @@ struct RemoteCallLabView: View {
         .navigationTitle("RemoteCall Lab")
         .onAppear {
             maxTestThreads = min(max(maxTestThreads, 1), 32)
+            if RemoteCallReturnPathStrategyOption(rawValue: returnPathProbeStrategy) == nil {
+                returnPathProbeStrategy = RemoteCallReturnPathStrategyOption.auto.rawValue
+            }
             refreshApps()
             mgr.refreshRemoteCallLabOffsetInfo()
         }
@@ -926,7 +950,7 @@ struct RemoteCallLabView: View {
         Section(
             header: HeaderLabel(text: "Arm Lab", icon: "syringe"),
             footer: VStack(alignment: .leading, spacing: 4) {
-                Text("Create Thread Only is disabled for ordinary apps unless the unsafe experimental path is enabled.")
+                Text("Return Path Probe is experimental and tests one signed return-path strategy per session.")
                 ForEach(labModes, id: \.rawValue) { mode in
                     Text("\(mode.title): \(mode.description)")
                 }
@@ -942,12 +966,18 @@ struct RemoteCallLabView: View {
             }
             .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed)
 
-            Toggle("Allow Unsafe Create Thread Path (Experimental)", isOn: $allowUnsafeCreateThreadExperimental)
+            Toggle("Allow Return Path Probe (Experimental)", isOn: $allowReturnPathProbeExperimental)
 
-            Button("Arm Create Thread Only") {
-                armLab(.createThreadOnly)
+            Picker("Return Path Strategy", selection: $returnPathProbeStrategy) {
+                ForEach(RemoteCallReturnPathStrategyOption.allCases, id: \.rawValue) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
             }
-            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowUnsafeCreateThreadExperimental)
+
+            Button("Arm Return Path Probe") {
+                armLab(.returnPathProbeOnly)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowReturnPathProbeExperimental)
 
             Button("Disarm Session") {
                 mgr.disarmRemoteCallLab()
@@ -968,7 +998,7 @@ struct RemoteCallLabView: View {
     }
 
     private var labModes: [RemoteCallLabActionMode] {
-        [.inventoryOnly, .restoreOnly, .createThreadOnly]
+        [.inventoryOnly, .restoreOnly, .returnPathProbeOnly]
     }
 
     private var manualOverridesAreEmpty: Bool {
