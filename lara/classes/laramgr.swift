@@ -949,7 +949,14 @@ final class laramgr: ObservableObject {
                     self.labReport = report
                     self.rcLastError = initError
                     self.endLabKeepAliveIfNeeded()
-                    if let initError, !initError.isEmpty {
+                    if mode.rawValue == 4 {
+                        self.labStatus = "Return-path probe prepare failed"
+                        if let initError, !initError.isEmpty {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
+                        } else {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable)")
+                        }
+                    } else if let initError, !initError.isEmpty {
                         self.labStatus = initError
                         self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
                     } else {
