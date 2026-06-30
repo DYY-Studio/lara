@@ -931,6 +931,7 @@ final class laramgr: ObservableObject {
         labStatus = "Arming \(modeTitle) for \(app.displayName)..."
         labReport = ""
         rcLastError = nil
+        RemoteCall.configureLabTargetBundlePath(app.bundlePath, executable: app.executable, bundleID: app.bundleID)
         beginLabKeepAliveIfNeeded()
         logmsg("rc.lab arm requested mode=\(modeTitle) process=\(app.executable) pid=\(pid)")
 
