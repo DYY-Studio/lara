@@ -681,7 +681,7 @@ private enum RemoteCallLabActionMode: Int {
         case .restoreOnly:
             return "Add classification and restore decisions, but do not create a call thread."
         case .returnPathProbeOnly:
-            return "Run one pending-exception ret_gadget probe with a signed return-path strategy, restore, and exit."
+            return "Run one pending-exception return-path probe with a selectable entry mode, restore, and exit."
         }
     }
 }
@@ -706,12 +706,27 @@ private enum RemoteCallReturnPathStrategyOption: Int, CaseIterable {
     }
 }
 
+private enum RemoteCallReturnPathEntryModeOption: Int, CaseIterable {
+    case retGadget = 0
+    case directTarget = 1
+
+    var title: String {
+        switch self {
+        case .retGadget:
+            return "RET Gadget"
+        case .directTarget:
+            return "Direct Target"
+        }
+    }
+}
+
 struct RemoteCallLabView: View {
     @ObservedObject private var mgr = laramgr.shared
     @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
     @AppStorage("lara.rc.lab.includeFirstQueueThread") private var includeFirstQueueThread: Bool = false
     @AppStorage("lara.rc.lab.allowReturnPathProbeExperimental") private var allowReturnPathProbeExperimental: Bool = false
     @AppStorage("lara.rc.lab.returnPathProbeStrategy") private var returnPathProbeStrategy: Int = 0
+    @AppStorage("lara.rc.lab.returnPathProbeEntryMode") private var returnPathProbeEntryMode: Int = 0
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -757,6 +772,9 @@ struct RemoteCallLabView: View {
             maxTestThreads = min(max(maxTestThreads, 1), 32)
             if RemoteCallReturnPathStrategyOption(rawValue: returnPathProbeStrategy) == nil {
                 returnPathProbeStrategy = RemoteCallReturnPathStrategyOption.auto.rawValue
+            }
+            if RemoteCallReturnPathEntryModeOption(rawValue: returnPathProbeEntryMode) == nil {
+                returnPathProbeEntryMode = RemoteCallReturnPathEntryModeOption.retGadget.rawValue
             }
             refreshApps()
             mgr.refreshRemoteCallLabOffsetInfo()
@@ -970,6 +988,12 @@ struct RemoteCallLabView: View {
 
             Picker("Return Path Strategy", selection: $returnPathProbeStrategy) {
                 ForEach(RemoteCallReturnPathStrategyOption.allCases, id: \.rawValue) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+
+            Picker("Probe Entry Mode", selection: $returnPathProbeEntryMode) {
+                ForEach(RemoteCallReturnPathEntryModeOption.allCases, id: \.rawValue) { option in
                     Text(option.title).tag(option.rawValue)
                 }
             }
