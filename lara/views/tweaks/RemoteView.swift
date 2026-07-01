@@ -738,11 +738,14 @@ private enum RemoteCallReturnPathRestoreModeOption: Int, CaseIterable {
 }
 
 private enum RemoteCallReturnPathAuthModeOption: Int, CaseIterable {
+    case auto = 2
     case signed = 0
     case raw = 1
 
     var title: String {
         switch self {
+        case .auto:
+            return "Auto"
         case .signed:
             return "Signed"
         case .raw:
@@ -759,8 +762,8 @@ struct RemoteCallLabView: View {
     @AppStorage("lara.rc.lab.returnPathProbeStrategy") private var returnPathProbeStrategy: Int = 0
     @AppStorage("lara.rc.lab.returnPathProbeEntryMode") private var returnPathProbeEntryMode: Int = 0
     @AppStorage("lara.rc.lab.returnPathProbeRestoreMode") private var returnPathProbeRestoreMode: Int = 0
-    @AppStorage("lara.rc.lab.returnPathProbePCAuthMode") private var returnPathProbePCAuthMode: Int = 0
-    @AppStorage("lara.rc.lab.returnPathProbeLRAuthMode") private var returnPathProbeLRAuthMode: Int = 0
+    @AppStorage("lara.rc.lab.returnPathProbePCAuthMode") private var returnPathProbePCAuthMode: Int = 2
+    @AppStorage("lara.rc.lab.returnPathProbeLRAuthMode") private var returnPathProbeLRAuthMode: Int = 2
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -814,10 +817,10 @@ struct RemoteCallLabView: View {
                 returnPathProbeRestoreMode = RemoteCallReturnPathRestoreModeOption.auto.rawValue
             }
             if RemoteCallReturnPathAuthModeOption(rawValue: returnPathProbePCAuthMode) == nil {
-                returnPathProbePCAuthMode = RemoteCallReturnPathAuthModeOption.signed.rawValue
+                returnPathProbePCAuthMode = RemoteCallReturnPathAuthModeOption.auto.rawValue
             }
             if RemoteCallReturnPathAuthModeOption(rawValue: returnPathProbeLRAuthMode) == nil {
-                returnPathProbeLRAuthMode = RemoteCallReturnPathAuthModeOption.signed.rawValue
+                returnPathProbeLRAuthMode = RemoteCallReturnPathAuthModeOption.auto.rawValue
             }
             refreshApps()
             mgr.refreshRemoteCallLabOffsetInfo()
