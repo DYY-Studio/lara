@@ -720,6 +720,23 @@ private enum RemoteCallReturnPathEntryModeOption: Int, CaseIterable {
     }
 }
 
+private enum RemoteCallReturnPathRestoreModeOption: Int, CaseIterable {
+    case auto = 0
+    case verbatimOriginal = 1
+    case resignOriginalExperimental = 2
+
+    var title: String {
+        switch self {
+        case .auto:
+            return "Auto"
+        case .verbatimOriginal:
+            return "Verbatim Original"
+        case .resignOriginalExperimental:
+            return "Resign Original (Experimental)"
+        }
+    }
+}
+
 struct RemoteCallLabView: View {
     @ObservedObject private var mgr = laramgr.shared
     @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
@@ -727,6 +744,7 @@ struct RemoteCallLabView: View {
     @AppStorage("lara.rc.lab.allowReturnPathProbeExperimental") private var allowReturnPathProbeExperimental: Bool = false
     @AppStorage("lara.rc.lab.returnPathProbeStrategy") private var returnPathProbeStrategy: Int = 0
     @AppStorage("lara.rc.lab.returnPathProbeEntryMode") private var returnPathProbeEntryMode: Int = 0
+    @AppStorage("lara.rc.lab.returnPathProbeRestoreMode") private var returnPathProbeRestoreMode: Int = 0
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -775,6 +793,9 @@ struct RemoteCallLabView: View {
             }
             if RemoteCallReturnPathEntryModeOption(rawValue: returnPathProbeEntryMode) == nil {
                 returnPathProbeEntryMode = RemoteCallReturnPathEntryModeOption.retGadget.rawValue
+            }
+            if RemoteCallReturnPathRestoreModeOption(rawValue: returnPathProbeRestoreMode) == nil {
+                returnPathProbeRestoreMode = RemoteCallReturnPathRestoreModeOption.auto.rawValue
             }
             refreshApps()
             mgr.refreshRemoteCallLabOffsetInfo()
@@ -994,6 +1015,12 @@ struct RemoteCallLabView: View {
 
             Picker("Probe Entry Mode", selection: $returnPathProbeEntryMode) {
                 ForEach(RemoteCallReturnPathEntryModeOption.allCases, id: \.rawValue) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+
+            Picker("Restore Mode", selection: $returnPathProbeRestoreMode) {
+                ForEach(RemoteCallReturnPathRestoreModeOption.allCases, id: \.rawValue) { option in
                     Text(option.title).tag(option.rawValue)
                 }
             }
