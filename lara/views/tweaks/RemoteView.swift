@@ -662,6 +662,7 @@ private enum RemoteCallLabActionMode: Int {
     case inventoryOnly = 1
     case restoreOnly = 2
     case returnPathProbeOnly = 4
+    case singleTempCallOnly = 5
 
     var title: String {
         switch self {
@@ -671,6 +672,8 @@ private enum RemoteCallLabActionMode: Int {
             return "Restore Only"
         case .returnPathProbeOnly:
             return "Return Path Probe"
+        case .singleTempCallOnly:
+            return "Single Temp Call"
         }
     }
 
@@ -682,6 +685,8 @@ private enum RemoteCallLabActionMode: Int {
             return "Add classification and restore decisions, but do not create a call thread."
         case .returnPathProbeOnly:
             return "Run one pending-exception return-path probe with a selectable entry mode, restore, and exit."
+        case .singleTempCallOnly:
+            return "Call the selected rebased temp-call profile once from FIRST_LANDING, validate the returned value, restore, and exit."
         }
     }
 }
@@ -754,6 +759,40 @@ private enum RemoteCallReturnPathAuthModeOption: Int, CaseIterable {
     }
 }
 
+private enum RemoteCallTempCallProfileOption: Int, CaseIterable {
+    case getpid = 0
+    case getppid = 1
+    case getuid = 2
+    case strnlen = 3
+
+    var title: String {
+        switch self {
+        case .getpid:
+            return "getpid"
+        case .getppid:
+            return "getppid"
+        case .getuid:
+            return "getuid"
+        case .strnlen:
+            return "strnlen"
+        }
+    }
+}
+
+private enum RemoteCallTempCallStrnlenCaseOption: Int, CaseIterable {
+    case clamp = 0
+    case exact = 1
+
+    var title: String {
+        switch self {
+        case .clamp:
+            return "Clamp"
+        case .exact:
+            return "Exact"
+        }
+    }
+}
+
 struct RemoteCallLabView: View {
     @ObservedObject private var mgr = laramgr.shared
     @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
@@ -764,6 +803,8 @@ struct RemoteCallLabView: View {
     @AppStorage("lara.rc.lab.returnPathProbeRestoreMode") private var returnPathProbeRestoreMode: Int = 0
     @AppStorage("lara.rc.lab.returnPathProbePCAuthMode") private var returnPathProbePCAuthMode: Int = 2
     @AppStorage("lara.rc.lab.returnPathProbeLRAuthMode") private var returnPathProbeLRAuthMode: Int = 2
+    @AppStorage("lara.rc.lab.tempCallProfile") private var tempCallProfile: Int = 0
+    @AppStorage("lara.rc.lab.tempCallStrnlenCase") private var tempCallStrnlenCase: Int = 0
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -821,6 +862,12 @@ struct RemoteCallLabView: View {
             }
             if RemoteCallReturnPathAuthModeOption(rawValue: returnPathProbeLRAuthMode) == nil {
                 returnPathProbeLRAuthMode = RemoteCallReturnPathAuthModeOption.auto.rawValue
+            }
+            if RemoteCallTempCallProfileOption(rawValue: tempCallProfile) == nil {
+                tempCallProfile = RemoteCallTempCallProfileOption.getpid.rawValue
+            }
+            if RemoteCallTempCallStrnlenCaseOption(rawValue: tempCallStrnlenCase) == nil {
+                tempCallStrnlenCase = RemoteCallTempCallStrnlenCaseOption.clamp.rawValue
             }
             refreshApps()
             mgr.refreshRemoteCallLabOffsetInfo()
@@ -1062,10 +1109,29 @@ struct RemoteCallLabView: View {
                 }
             }
 
+            Picker("Temp Call Profile", selection: $tempCallProfile) {
+                ForEach(RemoteCallTempCallProfileOption.allCases, id: \.rawValue) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+
+            if RemoteCallTempCallProfileOption(rawValue: tempCallProfile) == .strnlen {
+                Picker("strnlen Case", selection: $tempCallStrnlenCase) {
+                    ForEach(RemoteCallTempCallStrnlenCaseOption.allCases, id: \.rawValue) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+            }
+
             Button("Arm Return Path Probe") {
                 armLab(.returnPathProbeOnly)
             }
             .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowReturnPathProbeExperimental)
+
+            Button("Arm Single Temp Call") {
+                armLab(.singleTempCallOnly)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowReturnPathProbeExperimental || RemoteCallReturnPathStrategyOption(rawValue: returnPathProbeStrategy) == .pacFault)
 
             Button("Disarm Session") {
                 mgr.disarmRemoteCallLab()
@@ -1086,7 +1152,7 @@ struct RemoteCallLabView: View {
     }
 
     private var labModes: [RemoteCallLabActionMode] {
-        [.inventoryOnly, .restoreOnly, .returnPathProbeOnly]
+        [.inventoryOnly, .restoreOnly, .returnPathProbeOnly, .singleTempCallOnly]
     }
 
     private var manualOverridesAreEmpty: Bool {

@@ -769,6 +769,8 @@ final class laramgr: ObservableObject {
             return "CreateThreadOnly"
         case 4:
             return "ReturnPathProbeOnly"
+        case 5:
+            return "SingleTempCallOnly"
         default:
             return "Standard"
         }
@@ -909,11 +911,24 @@ final class laramgr: ObservableObject {
             completion?(false)
             return
         }
-        if mode.rawValue == 4 && !returnPathProbeExperimentalEnabled {
-            let message = "Signed return-path probe is disabled for ordinary apps unless experimental mode is enabled."
+        if (mode.rawValue == 4 || mode.rawValue == 5) && !returnPathProbeExperimentalEnabled {
+            let message = mode.rawValue == 5
+                ? "Single temp call is disabled for ordinary apps unless experimental mode is enabled."
+                : "Signed return-path probe is disabled for ordinary apps unless experimental mode is enabled."
             labStatus = message
             rcLastError = message
-            logmsg("rc.lab.return_probe: blocked policy=experimental-toggle-disabled")
+            logmsg(mode.rawValue == 5
+                ? "rc.lab.temp_call: blocked policy=experimental-toggle-disabled"
+                : "rc.lab.return_probe: blocked policy=experimental-toggle-disabled")
+            completion?(false)
+            return
+        }
+        if mode.rawValue == 5,
+           UserDefaults.standard.integer(forKey: "lara.rc.lab.returnPathProbeStrategy") == 3 {
+            let message = "PACFault is unavailable for SingleTempCallOnly."
+            labStatus = message
+            rcLastError = message
+            logmsg("rc.lab.temp_call: blocked reason=pacfault_unavailable_for_single_temp_call")
             completion?(false)
             return
         }
@@ -952,6 +967,13 @@ final class laramgr: ObservableObject {
                     self.endLabKeepAliveIfNeeded()
                     if mode.rawValue == 4 {
                         self.labStatus = "Return-path probe prepare failed"
+                        if let initError, !initError.isEmpty {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
+                        } else {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable)")
+                        }
+                    } else if mode.rawValue == 5 {
+                        self.labStatus = "Single temp call prepare failed"
                         if let initError, !initError.isEmpty {
                             self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
                         } else {
