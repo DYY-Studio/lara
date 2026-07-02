@@ -764,6 +764,8 @@ private enum RemoteCallTempCallProfileOption: Int, CaseIterable {
     case getppid = 1
     case getuid = 2
     case strnlen = 3
+    case pthreadCreateCommon = 4
+    case pthreadCreateResume = 5
 
     var title: String {
         switch self {
@@ -775,6 +777,10 @@ private enum RemoteCallTempCallProfileOption: Int, CaseIterable {
             return "getuid"
         case .strnlen:
             return "strnlen"
+        case .pthreadCreateCommon:
+            return "pthread_create_common"
+        case .pthreadCreateResume:
+            return "pthread_create_resume"
         }
     }
 }
