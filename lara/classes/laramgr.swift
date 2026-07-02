@@ -911,24 +911,35 @@ final class laramgr: ObservableObject {
             completion?(false)
             return
         }
-        if (mode.rawValue == 4 || mode.rawValue == 5) && !returnPathProbeExperimentalEnabled {
-            let message = mode.rawValue == 5
-                ? "Single temp call is disabled for ordinary apps unless experimental mode is enabled."
-                : "Signed return-path probe is disabled for ordinary apps unless experimental mode is enabled."
+        if (mode.rawValue == 4 || mode.rawValue == 5 || mode.rawValue == 6) && !returnPathProbeExperimentalEnabled {
+            let message: String
+            if mode.rawValue == 5 {
+                message = "Single temp call is disabled for ordinary apps unless experimental mode is enabled."
+            } else if mode.rawValue == 6 {
+                message = "Call-thread one-shot RC is disabled for ordinary apps unless experimental mode is enabled."
+            } else {
+                message = "Signed return-path probe is disabled for ordinary apps unless experimental mode is enabled."
+            }
             labStatus = message
             rcLastError = message
             logmsg(mode.rawValue == 5
                 ? "rc.lab.temp_call: blocked policy=experimental-toggle-disabled"
-                : "rc.lab.return_probe: blocked policy=experimental-toggle-disabled")
+                : (mode.rawValue == 6
+                    ? "rc.lab.call_thread: blocked policy=experimental-toggle-disabled"
+                    : "rc.lab.return_probe: blocked policy=experimental-toggle-disabled"))
             completion?(false)
             return
         }
-        if mode.rawValue == 5,
+        if (mode.rawValue == 5 || mode.rawValue == 6),
            UserDefaults.standard.integer(forKey: "lara.rc.lab.returnPathProbeStrategy") == 3 {
-            let message = "PACFault is unavailable for SingleTempCallOnly."
+            let message = mode.rawValue == 6
+                ? "PACFault is unavailable for CallThreadOneShotRCOnly."
+                : "PACFault is unavailable for SingleTempCallOnly."
             labStatus = message
             rcLastError = message
-            logmsg("rc.lab.temp_call: blocked reason=pacfault_unavailable_for_single_temp_call")
+            logmsg(mode.rawValue == 6
+                ? "rc.lab.call_thread: blocked reason=pacfault_unavailable_for_call_thread_one_shot"
+                : "rc.lab.temp_call: blocked reason=pacfault_unavailable_for_single_temp_call")
             completion?(false)
             return
         }

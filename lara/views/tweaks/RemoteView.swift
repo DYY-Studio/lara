@@ -663,6 +663,7 @@ private enum RemoteCallLabActionMode: Int {
     case restoreOnly = 2
     case returnPathProbeOnly = 4
     case singleTempCallOnly = 5
+    case callThreadOneShotRCOnly = 6
 
     var title: String {
         switch self {
@@ -674,6 +675,8 @@ private enum RemoteCallLabActionMode: Int {
             return "Return Path Probe"
         case .singleTempCallOnly:
             return "Single Temp Call"
+        case .callThreadOneShotRCOnly:
+            return "Call Thread One-shot RC"
         }
     }
 
@@ -687,6 +690,8 @@ private enum RemoteCallLabActionMode: Int {
             return "Run one pending-exception return-path probe with a selectable entry mode, restore, and exit."
         case .singleTempCallOnly:
             return "Call the selected rebased temp-call profile once from FIRST_LANDING, validate the returned value, restore, and exit."
+        case .callThreadOneShotRCOnly:
+            return "Create a suspended call thread, bootstrap it through SECOND_LANDING, run one dedicated-thread getpid remote call, then exit the call thread."
         }
     }
 }
@@ -1139,6 +1144,11 @@ struct RemoteCallLabView: View {
             }
             .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowReturnPathProbeExperimental || RemoteCallReturnPathStrategyOption(rawValue: returnPathProbeStrategy) == .pacFault)
 
+            Button("Arm Call Thread One-shot RC") {
+                armLab(.callThreadOneShotRCOnly)
+            }
+            .disabled(selectedApp == nil || launchRunning || mgr.labRunning || mgr.labArmed || !allowReturnPathProbeExperimental || RemoteCallReturnPathStrategyOption(rawValue: returnPathProbeStrategy) == .pacFault)
+
             Button("Disarm Session") {
                 mgr.disarmRemoteCallLab()
             }
@@ -1158,7 +1168,7 @@ struct RemoteCallLabView: View {
     }
 
     private var labModes: [RemoteCallLabActionMode] {
-        [.inventoryOnly, .restoreOnly, .returnPathProbeOnly, .singleTempCallOnly]
+        [.inventoryOnly, .restoreOnly, .returnPathProbeOnly, .singleTempCallOnly, .callThreadOneShotRCOnly]
     }
 
     private var manualOverridesAreEmpty: Bool {
