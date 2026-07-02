@@ -771,6 +771,10 @@ final class laramgr: ObservableObject {
             return "ReturnPathProbeOnly"
         case 5:
             return "SingleTempCallOnly"
+        case 6:
+            return "CallThreadOneShotRCOnly"
+        case 7:
+            return "CallThreadReadySessionOnly"
         default:
             return "Standard"
         }
@@ -789,6 +793,7 @@ final class laramgr: ObservableObject {
         static let createThreadReady = 5
         static let cancelled = 6
         static let failed = 7
+        static let callThreadReady = 8
     }
 
     private func labStatusFallback(stateRaw: Int, lastError: String?) -> String {
@@ -801,6 +806,8 @@ final class laramgr: ObservableObject {
             return "Completed"
         case LabSessionStateValue.createThreadReady:
             return "Create-thread ready"
+        case LabSessionStateValue.callThreadReady:
+            return "Call-thread ready"
         case LabSessionStateValue.cancelled:
             return "Cancelled"
         case LabSessionStateValue.failed:
@@ -911,12 +918,14 @@ final class laramgr: ObservableObject {
             completion?(false)
             return
         }
-        if (mode.rawValue == 4 || mode.rawValue == 5 || mode.rawValue == 6) && !returnPathProbeExperimentalEnabled {
+        if (mode.rawValue == 4 || mode.rawValue == 5 || mode.rawValue == 6 || mode.rawValue == 7) && !returnPathProbeExperimentalEnabled {
             let message: String
             if mode.rawValue == 5 {
                 message = "Single temp call is disabled for ordinary apps unless experimental mode is enabled."
             } else if mode.rawValue == 6 {
                 message = "Call-thread one-shot RC is disabled for ordinary apps unless experimental mode is enabled."
+            } else if mode.rawValue == 7 {
+                message = "Call-thread ready session is disabled for ordinary apps unless experimental mode is enabled."
             } else {
                 message = "Signed return-path probe is disabled for ordinary apps unless experimental mode is enabled."
             }
@@ -926,20 +935,26 @@ final class laramgr: ObservableObject {
                 ? "rc.lab.temp_call: blocked policy=experimental-toggle-disabled"
                 : (mode.rawValue == 6
                     ? "rc.lab.call_thread: blocked policy=experimental-toggle-disabled"
-                    : "rc.lab.return_probe: blocked policy=experimental-toggle-disabled"))
+                    : (mode.rawValue == 7
+                        ? "rc.lab.call_thread_ready: blocked policy=experimental-toggle-disabled"
+                        : "rc.lab.return_probe: blocked policy=experimental-toggle-disabled")))
             completion?(false)
             return
         }
-        if (mode.rawValue == 5 || mode.rawValue == 6),
+        if (mode.rawValue == 5 || mode.rawValue == 6 || mode.rawValue == 7),
            UserDefaults.standard.integer(forKey: "lara.rc.lab.returnPathProbeStrategy") == 3 {
-            let message = mode.rawValue == 6
-                ? "PACFault is unavailable for CallThreadOneShotRCOnly."
-                : "PACFault is unavailable for SingleTempCallOnly."
+            let message: String = mode.rawValue == 7
+                ? "PACFault is unavailable for CallThreadReadySessionOnly."
+                : (mode.rawValue == 6
+                    ? "PACFault is unavailable for CallThreadOneShotRCOnly."
+                    : "PACFault is unavailable for SingleTempCallOnly.")
             labStatus = message
             rcLastError = message
-            logmsg(mode.rawValue == 6
-                ? "rc.lab.call_thread: blocked reason=pacfault_unavailable_for_call_thread_one_shot"
-                : "rc.lab.temp_call: blocked reason=pacfault_unavailable_for_single_temp_call")
+            logmsg(mode.rawValue == 7
+                ? "rc.lab.call_thread_ready: blocked reason=pacfault_unavailable_for_call_thread_ready_session"
+                : (mode.rawValue == 6
+                    ? "rc.lab.call_thread: blocked reason=pacfault_unavailable_for_call_thread_one_shot"
+                    : "rc.lab.temp_call: blocked reason=pacfault_unavailable_for_single_temp_call"))
             completion?(false)
             return
         }
@@ -990,6 +1005,20 @@ final class laramgr: ObservableObject {
                         } else {
                             self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable)")
                         }
+                    } else if mode.rawValue == 6 {
+                        self.labStatus = "Call-thread one-shot RC prepare failed"
+                        if let initError, !initError.isEmpty {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
+                        } else {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable)")
+                        }
+                    } else if mode.rawValue == 7 {
+                        self.labStatus = "Call-thread ready session prepare failed"
+                        if let initError, !initError.isEmpty {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
+                        } else {
+                            self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable)")
+                        }
                     } else if let initError, !initError.isEmpty {
                         self.labStatus = initError
                         self.logmsg("rc.lab arm failed mode=\(modeTitle) process=\(app.executable): \(initError)")
@@ -1027,12 +1056,14 @@ final class laramgr: ObservableObject {
                             ? self.labStatusFallback(stateRaw: finalState, lastError: finalError)
                             : finalStatus
 
-                        if finalState == LabSessionStateValue.createThreadReady {
+                        if finalState == LabSessionStateValue.createThreadReady || finalState == LabSessionStateValue.callThreadReady {
                             self.labProc = proc
                             self.labArmed = true
                             self.labRunning = false
                             self.beginLabKeepAliveIfNeeded()
-                            self.logmsg("rc.lab create-thread ready mode=\(modeTitle) process=\(app.executable)")
+                            self.logmsg(finalState == LabSessionStateValue.callThreadReady
+                                ? "rc.lab call-thread ready mode=\(modeTitle) process=\(app.executable)"
+                                : "rc.lab create-thread ready mode=\(modeTitle) process=\(app.executable)")
                         } else {
                             if self.labProc === proc {
                                 self.labProc = nil
@@ -1066,7 +1097,7 @@ final class laramgr: ObservableObject {
         }
 
         let stateRaw = proc.labSessionState.rawValue
-        if stateRaw == LabSessionStateValue.createThreadReady {
+        if stateRaw == LabSessionStateValue.createThreadReady || stateRaw == LabSessionStateValue.callThreadReady {
             labRunning = true
             labStatus = "Disarming Lab session..."
             logmsg("rc.lab disarm requested")
