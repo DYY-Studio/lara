@@ -807,7 +807,7 @@ final class laramgr: ObservableObject {
         case LabSessionStateValue.createThreadReady:
             return "Create-thread ready"
         case LabSessionStateValue.callThreadReady:
-            return "Call-thread ready"
+            return "Call-thread ready (Stable RC available)"
         case LabSessionStateValue.cancelled:
             return "Cancelled"
         case LabSessionStateValue.failed:
@@ -1097,7 +1097,9 @@ final class laramgr: ObservableObject {
         }
 
         let stateRaw = proc.labSessionState.rawValue
-        if stateRaw == LabSessionStateValue.createThreadReady || stateRaw == LabSessionStateValue.callThreadReady {
+        if stateRaw == LabSessionStateValue.createThreadReady ||
+            stateRaw == LabSessionStateValue.callThreadReady ||
+            stateRaw == LabSessionStateValue.failed {
             labRunning = true
             labStatus = "Disarming Lab session..."
             logmsg("rc.lab disarm requested")
