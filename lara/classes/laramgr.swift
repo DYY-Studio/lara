@@ -1131,6 +1131,58 @@ final class laramgr: ObservableObject {
         completion?()
     }
 
+    func runRemoteCallLabStableTest(profile: Int, strnlenCase: Int, stackArgVariant: Int, completion: ((Bool) -> Void)? = nil) {
+        guard let proc = labProc else {
+            labStatus = "No active Lab session."
+            completion?(false)
+            return
+        }
+
+        let stateRaw = proc.labSessionState.rawValue
+        guard stateRaw == LabSessionStateValue.callThreadReady else {
+            let message = "Stable RC test requires a held Call Thread Ready Session."
+            labStatus = message
+            rcLastError = message
+            completion?(false)
+            return
+        }
+
+        labRunning = true
+        labStatus = "Running stable RC test..."
+        rcLastError = nil
+        logmsg("rc.lab stable test requested profile=\(profile) strnlenCase=\(strnlenCase) stackArgVariant=\(stackArgVariant)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary = proc.runOrdinaryAppStableCallTestProfile(profile, strnlenCase: strnlenCase, stackArgVariant: stackArgVariant) ?? [:]
+            let success = summary["success"] as? Bool ?? false
+            let profileName = summary["profileName"] as? String ?? "unknown"
+            let finalState = proc.labSessionState.rawValue
+            let finalStatus = proc.labSessionStatusText ?? ""
+            let finalError = proc.lastError
+            let finalReport = proc.sessionReport ?? ""
+
+            DispatchQueue.main.async {
+                self.labRunning = false
+                self.labProc = proc
+                self.labReport = finalReport
+                self.rcLastError = finalError
+                self.labArmed = true
+                self.beginLabKeepAliveIfNeeded()
+
+                if success {
+                    self.labStatus = finalStatus.isEmpty ? "Stable RC test completed." : finalStatus
+                    self.logmsg("rc.lab stable test completed profile=\(profileName) state=\(finalState)")
+                } else {
+                    self.labStatus = finalStatus.isEmpty
+                        ? (finalError?.isEmpty == false ? finalError! : "Stable RC test failed.")
+                        : finalStatus
+                    self.logmsg("rc.lab stable test failed profile=\(profileName) state=\(finalState)")
+                }
+                completion?(success)
+            }
+        }
+    }
+
     func rcinit(process: String, migbypass: Bool = false, completion: ((Bool) -> Void)? = nil) {
         guard dsready, !rcready else {
             completion?(false)

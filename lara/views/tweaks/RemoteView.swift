@@ -809,6 +809,43 @@ private enum RemoteCallTempCallStrnlenCaseOption: Int, CaseIterable {
     }
 }
 
+private enum RemoteCallStableCallProfileOption: Int, CaseIterable {
+    case getpid = 0
+    case strnlen = 1
+    case memsetScratch = 2
+    case memcpyScratch = 3
+    case syscallGetpidStack = 4
+
+    var title: String {
+        switch self {
+        case .getpid:
+            return "getpid"
+        case .strnlen:
+            return "strnlen"
+        case .memsetScratch:
+            return "memsetScratch"
+        case .memcpyScratch:
+            return "memcpyScratch"
+        case .syscallGetpidStack:
+            return "syscallGetpidStack16"
+        }
+    }
+}
+
+private enum RemoteCallStableCallStackVariantOption: Int, CaseIterable {
+    case args9 = 0
+    case args16 = 1
+
+    var title: String {
+        switch self {
+        case .args9:
+            return "9 Args"
+        case .args16:
+            return "16 Args"
+        }
+    }
+}
+
 struct RemoteCallLabView: View {
     @ObservedObject private var mgr = laramgr.shared
     @AppStorage("lara.rc.lab.maxTestThreads") private var maxTestThreads: Int = 8
@@ -821,6 +858,9 @@ struct RemoteCallLabView: View {
     @AppStorage("lara.rc.lab.returnPathProbeLRAuthMode") private var returnPathProbeLRAuthMode: Int = 2
     @AppStorage("lara.rc.lab.tempCallProfile") private var tempCallProfile: Int = 0
     @AppStorage("lara.rc.lab.tempCallStrnlenCase") private var tempCallStrnlenCase: Int = 0
+    @AppStorage("lara.rc.lab.stableCallProfile") private var stableCallProfile: Int = 0
+    @AppStorage("lara.rc.lab.stableCallStrnlenCase") private var stableCallStrnlenCase: Int = 0
+    @AppStorage("lara.rc.lab.stableCallStackVariant") private var stableCallStackVariant: Int = 0
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -859,6 +899,7 @@ struct RemoteCallLabView: View {
             offsetsSection
             appSwitchingSection
             armSection
+            stableCallSection
             sessionSummarySection
         }
         .navigationTitle("RemoteCall Lab")
@@ -884,6 +925,15 @@ struct RemoteCallLabView: View {
             }
             if RemoteCallTempCallStrnlenCaseOption(rawValue: tempCallStrnlenCase) == nil {
                 tempCallStrnlenCase = RemoteCallTempCallStrnlenCaseOption.clamp.rawValue
+            }
+            if RemoteCallStableCallProfileOption(rawValue: stableCallProfile) == nil {
+                stableCallProfile = RemoteCallStableCallProfileOption.getpid.rawValue
+            }
+            if RemoteCallTempCallStrnlenCaseOption(rawValue: stableCallStrnlenCase) == nil {
+                stableCallStrnlenCase = RemoteCallTempCallStrnlenCaseOption.clamp.rawValue
+            }
+            if RemoteCallStableCallStackVariantOption(rawValue: stableCallStackVariant) == nil {
+                stableCallStackVariant = RemoteCallStableCallStackVariantOption.args9.rawValue
             }
             refreshApps()
             mgr.refreshRemoteCallLabOffsetInfo()
@@ -1163,6 +1213,45 @@ struct RemoteCallLabView: View {
                 mgr.disarmRemoteCallLab()
             }
             .disabled(!mgr.labArmed && !mgr.labRunning)
+        }
+    }
+
+    @ViewBuilder
+    private var stableCallSection: some View {
+        Section(
+            header: HeaderLabel(text: "Stable RC", icon: "repeat"),
+            footer: Text("Runs fixed stable-call profiles on the held dedicated call thread. Requires an active Call Thread Ready Session.")
+        ) {
+            Picker("Stable Call Profile", selection: $stableCallProfile) {
+                ForEach(RemoteCallStableCallProfileOption.allCases, id: \.rawValue) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+
+            if RemoteCallStableCallProfileOption(rawValue: stableCallProfile) == .strnlen {
+                Picker("Stable strnlen Case", selection: $stableCallStrnlenCase) {
+                    ForEach(RemoteCallTempCallStrnlenCaseOption.allCases, id: \.rawValue) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+            }
+
+            if RemoteCallStableCallProfileOption(rawValue: stableCallProfile) == .syscallGetpidStack {
+                Picker("Stack Args Variant", selection: $stableCallStackVariant) {
+                    ForEach(RemoteCallStableCallStackVariantOption.allCases, id: \.rawValue) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+            }
+
+            Button("Run Stable RC Test") {
+                mgr.runRemoteCallLabStableTest(
+                    profile: stableCallProfile,
+                    strnlenCase: stableCallStrnlenCase,
+                    stackArgVariant: stableCallStackVariant
+                )
+            }
+            .disabled(mgr.labRunning || !mgr.labArmed || mgr.labProc?.labSessionState.rawValue != 8)
         }
     }
 
