@@ -867,6 +867,7 @@ struct RemoteCallLabView: View {
     @AppStorage("lara.rc.lab.stableCallProfile") private var stableCallProfile: Int = 0
     @AppStorage("lara.rc.lab.stableCallStrnlenCase") private var stableCallStrnlenCase: Int = 0
     @AppStorage("lara.rc.lab.stableCallStackVariant") private var stableCallStackVariant: Int = 0
+    @AppStorage("lara.rc.lab.stableDlsymSymbol") private var stableDlsymSymbol: String = "getpid"
     @AppStorage("lara.rc.lab.ios16.threadCpuDataOffsetOverride") private var threadCpuDataOffsetOverride: String = ""
     @AppStorage("lara.rc.lab.ios16.activeThreadOffsetOverride") private var activeThreadOffsetOverride: String = ""
     @State private var query: String = ""
@@ -1226,7 +1227,7 @@ struct RemoteCallLabView: View {
     private var stableCallSection: some View {
         Section(
             header: HeaderLabel(text: "Stable RC", icon: "repeat"),
-            footer: Text("Runs fixed stable-call profiles on the held dedicated call thread. Requires an active Call Thread Ready Session.")
+            footer: Text("Runs fixed stable-call profiles or a remote dlsym resolution on the held dedicated call thread. Requires an active Call Thread Ready Session.")
         ) {
             Picker("Stable Call Profile", selection: $stableCallProfile) {
                 ForEach(RemoteCallStableCallProfileOption.allCases, id: \.rawValue) { option in
@@ -1258,6 +1259,15 @@ struct RemoteCallLabView: View {
                 )
             }
             .disabled(mgr.labRunning || !mgr.labArmed || mgr.labProc?.labSessionState.rawValue != 8)
+
+            TextField("Remote dlsym Symbol", text: $stableDlsymSymbol)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            Button("Run Stable dlsym") {
+                mgr.runRemoteCallLabStableDlsym(symbol: stableDlsymSymbol)
+            }
+            .disabled(mgr.labRunning || !mgr.labArmed || mgr.labProc?.labSessionState.rawValue != 8 || stableDlsymSymbol.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 

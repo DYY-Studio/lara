@@ -1186,6 +1186,68 @@ final class laramgr: ObservableObject {
         }
     }
 
+    func runRemoteCallLabStableDlsym(symbol: String, completion: ((Bool) -> Void)? = nil) {
+        guard let proc = labProc else {
+            labStatus = "No active Lab session."
+            completion?(false)
+            return
+        }
+
+        let stateRaw = proc.labSessionState.rawValue
+        guard stateRaw == LabSessionStateValue.callThreadReady else {
+            let message = "Stable dlsym requires a held Call Thread Ready Session."
+            labStatus = message
+            rcLastError = message
+            completion?(false)
+            return
+        }
+
+        let trimmedSymbol = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSymbol.isEmpty else {
+            let message = "Stable dlsym requires a non-empty symbol name."
+            labStatus = message
+            rcLastError = message
+            completion?(false)
+            return
+        }
+
+        labRunning = true
+        labStatus = "Running stable dlsym..."
+        rcLastError = nil
+        logmsg("rc.lab stable dlsym requested symbol=\(trimmedSymbol)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary = proc.runOrdinaryAppStableDlsymCall(withSymbol: trimmedSymbol) ?? [:]
+            let success = summary["success"] as? Bool ?? false
+            let resolved = summary["resolved"] as? Bool ?? false
+            let value = (summary["value"] as? NSNumber)?.uint64Value ?? 0
+            let finalState = proc.labSessionState.rawValue
+            let finalStatus = proc.labSessionStatusText ?? ""
+            let finalError = proc.lastError
+            let finalReport = proc.sessionReport ?? ""
+
+            DispatchQueue.main.async {
+                self.labRunning = false
+                self.labProc = proc
+                self.labReport = finalReport
+                self.rcLastError = finalError
+                self.labArmed = true
+                self.beginLabKeepAliveIfNeeded()
+
+                if success {
+                    self.labStatus = finalStatus.isEmpty ? "Stable dlsym resolved 0x\(String(value, radix: 16))." : finalStatus
+                    self.logmsg("rc.lab stable dlsym completed symbol=\(trimmedSymbol) resolved=\(resolved) value=0x\(String(value, radix: 16)) state=\(finalState)")
+                } else {
+                    self.labStatus = finalStatus.isEmpty
+                        ? (finalError?.isEmpty == false ? finalError! : "Stable dlsym failed.")
+                        : finalStatus
+                    self.logmsg("rc.lab stable dlsym failed symbol=\(trimmedSymbol) resolved=\(resolved) value=0x\(String(value, radix: 16)) state=\(finalState)")
+                }
+                completion?(success)
+            }
+        }
+    }
+
     func rcinit(process: String, migbypass: Bool = false, completion: ((Bool) -> Void)? = nil) {
         guard dsready, !rcready else {
             completion?(false)
