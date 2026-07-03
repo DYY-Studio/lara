@@ -815,6 +815,8 @@ private enum RemoteCallStableCallProfileOption: Int, CaseIterable {
     case memsetScratch = 2
     case memcpyScratch = 3
     case syscallGetpidStack = 4
+    case getcwdScratch = 5
+    case unameScratch = 6
 
     var title: String {
         switch self {
@@ -828,6 +830,10 @@ private enum RemoteCallStableCallProfileOption: Int, CaseIterable {
             return "memcpyScratch"
         case .syscallGetpidStack:
             return "syscallGetpidStack16"
+        case .getcwdScratch:
+            return "getcwdScratch"
+        case .unameScratch:
+            return "unameScratch"
         }
     }
 }
