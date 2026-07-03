@@ -1107,6 +1107,8 @@ final class laramgr: ObservableObject {
             DispatchQueue.global(qos: .userInitiated).async {
                 proc.destroy()
                 let report = proc.sessionReport ?? ""
+                let finalStatus = proc.labSessionStatusText ?? ""
+                let finalError = proc.lastError
 
                 DispatchQueue.main.async {
                     if self.labProc === proc {
@@ -1115,7 +1117,8 @@ final class laramgr: ObservableObject {
                     self.labRunning = false
                     self.labArmed = false
                     self.labReport = report
-                    self.labStatus = "Lab session disarmed."
+                    self.rcLastError = finalError
+                    self.labStatus = finalStatus.isEmpty ? "Lab session disarmed." : finalStatus
                     self.endLabKeepAliveIfNeeded()
                     self.logmsg("rc.lab session disarmed")
                     completion?()
