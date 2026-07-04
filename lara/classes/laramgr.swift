@@ -145,6 +145,10 @@ final class laramgr: ObservableObject {
     @Published var labStatus: String = ""
     @Published var labReport: String = ""
     @Published var labOffsetSummary: String = ""
+    @Published var keychainSecItemAddress: UInt64 = 0
+    @Published var keychainListResult: [[String: Any]] = []
+    @Published var keychainFetchResult: String = ""
+    @Published var keychainClassName: String = "GenericPassword"
     #endif
     
     @Published var vfsready: Bool = false
@@ -1242,6 +1246,168 @@ final class laramgr: ObservableObject {
                         ? (finalError?.isEmpty == false ? finalError! : "Stable dlsym failed.")
                         : finalStatus
                     self.logmsg("rc.lab stable dlsym failed symbol=\(trimmedSymbol) resolved=\(resolved) value=0x\(String(value, radix: 16)) state=\(finalState)")
+                }
+                completion?(success)
+            }
+        }
+    }
+
+    func runRemoteCallLabKeychainResolve(completion: ((Bool) -> Void)? = nil) {
+        guard let proc = labProc else {
+            labStatus = "No active Lab session."
+            completion?(false)
+            return
+        }
+
+        let stateRaw = proc.labSessionState.rawValue
+        guard stateRaw == LabSessionStateValue.callThreadReady else {
+            let message = "Keychain resolve requires a held Call Thread Ready Session."
+            labStatus = message
+            rcLastError = message
+            completion?(false)
+            return
+        }
+
+        labRunning = true
+        labStatus = "Resolving SecItemCopyMatching..."
+        rcLastError = nil
+        logmsg("rc.lab keychain resolve requested")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary = proc.runOrdinaryAppStableKeychainResolveSecItem() ?? [:]
+            let success = summary["success"] as? Bool ?? false
+            let address = (summary["address"] as? NSNumber)?.uint64Value ?? 0
+            let finalStatus = proc.labSessionStatusText ?? ""
+            let finalError = proc.lastError
+            let finalReport = proc.sessionReport ?? ""
+
+            DispatchQueue.main.async {
+                self.labRunning = false
+                self.labProc = proc
+                self.labReport = finalReport
+                self.rcLastError = finalError
+                self.labArmed = true
+                self.beginLabKeepAliveIfNeeded()
+
+                if success {
+                    self.keychainSecItemAddress = address
+                    self.labStatus = finalStatus.isEmpty ? "SecItemCopyMatching resolved at 0x\(String(address, radix: 16))." : finalStatus
+                    self.logmsg("rc.lab keychain resolve completed address=0x\(String(address, radix: 16))")
+                } else {
+                    self.keychainSecItemAddress = 0
+                    self.labStatus = finalStatus.isEmpty
+                        ? (finalError?.isEmpty == false ? finalError! : "Keychain resolve failed.")
+                        : finalStatus
+                    self.logmsg("rc.lab keychain resolve failed")
+                }
+                completion?(success)
+            }
+        }
+    }
+
+    func runRemoteCallLabKeychainList(className: String, returnData: Bool, completion: ((Bool) -> Void)? = nil) {
+        guard let proc = labProc else {
+            labStatus = "No active Lab session."
+            completion?(false)
+            return
+        }
+
+        let stateRaw = proc.labSessionState.rawValue
+        guard stateRaw == LabSessionStateValue.callThreadReady else {
+            let message = "Keychain list requires a held Call Thread Ready Session."
+            labStatus = message
+            rcLastError = message
+            completion?(false)
+            return
+        }
+
+        labRunning = true
+        labStatus = "Listing keychain items (\(className))..."
+        rcLastError = nil
+        logmsg("rc.lab keychain list requested class=\(className) returnData=\(returnData)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary = proc.runOrdinaryAppStableKeychainList(withClass: className, returnData: returnData) ?? [:]
+            let success = summary["success"] as? Bool ?? false
+            let items = summary["items"] as? [[String: Any]] ?? []
+            let itemCount = (summary["itemCount"] as? NSNumber)?.intValue ?? 0
+            let finalStatus = proc.labSessionStatusText ?? ""
+            let finalError = proc.lastError
+            let finalReport = proc.sessionReport ?? ""
+
+            DispatchQueue.main.async {
+                self.labRunning = false
+                self.labProc = proc
+                self.labReport = finalReport
+                self.rcLastError = finalError
+                self.labArmed = true
+                self.keychainClassName = className
+                self.beginLabKeepAliveIfNeeded()
+
+                if success {
+                    self.keychainListResult = items
+                    self.labStatus = finalStatus.isEmpty ? "Listed \(itemCount) keychain items (\(className))." : finalStatus
+                    self.logmsg("rc.lab keychain list completed class=\(className) count=\(itemCount)")
+                } else {
+                    self.keychainListResult = []
+                    self.labStatus = finalStatus.isEmpty
+                        ? (finalError?.isEmpty == false ? finalError! : "Keychain list failed.")
+                        : finalStatus
+                    self.logmsg("rc.lab keychain list failed class=\(className)")
+                }
+                completion?(success)
+            }
+        }
+    }
+
+    func runRemoteCallLabKeychainFetch(itemAttrs: [String: Any], className: String, completion: ((Bool) -> Void)? = nil) {
+        guard let proc = labProc else {
+            labStatus = "No active Lab session."
+            completion?(false)
+            return
+        }
+
+        let stateRaw = proc.labSessionState.rawValue
+        guard stateRaw == LabSessionStateValue.callThreadReady else {
+            let message = "Keychain fetch requires a held Call Thread Ready Session."
+            labStatus = message
+            rcLastError = message
+            completion?(false)
+            return
+        }
+
+        let itemIndex = (itemAttrs["index"] as? NSNumber)?.intValue ?? -1
+        labRunning = true
+        labStatus = "Fetching keychain item \(itemIndex)..."
+        rcLastError = nil
+        logmsg("rc.lab keychain fetch requested class=\(className) index=\(itemIndex)")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary = proc.runOrdinaryAppStableKeychainFetchItem(itemAttrs, fromClass: className) ?? [:]
+            let success = summary["success"] as? Bool ?? false
+            let data = summary["data"] as? String ?? ""
+            let finalStatus = proc.labSessionStatusText ?? ""
+            let finalError = proc.lastError
+            let finalReport = proc.sessionReport ?? ""
+
+            DispatchQueue.main.async {
+                self.labRunning = false
+                self.labProc = proc
+                self.labReport = finalReport
+                self.rcLastError = finalError
+                self.labArmed = true
+                self.beginLabKeepAliveIfNeeded()
+
+                if success {
+                    self.keychainFetchResult = data
+                    self.labStatus = finalStatus.isEmpty ? "Fetched keychain item \(itemIndex)." : finalStatus
+                    self.logmsg("rc.lab keychain fetch completed index=\(itemIndex) data_len=\(data.count)")
+                } else {
+                    self.keychainFetchResult = ""
+                    self.labStatus = finalStatus.isEmpty
+                        ? (finalError?.isEmpty == false ? finalError! : "Keychain fetch failed.")
+                        : finalStatus
+                    self.logmsg("rc.lab keychain fetch failed index=\(itemIndex)")
                 }
                 completion?(success)
             }

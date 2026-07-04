@@ -874,6 +874,9 @@ struct RemoteCallLabView: View {
     @State private var apps: [InstalledUserApp] = []
     @State private var selectedAppID: String?
     @State private var launchRunning: Bool = false
+    @State private var keychainSelectedClass: String = "GenericPassword"
+    @State private var keychainReturnData: Bool = false
+    @State private var keychainSelectedFetchIndex: Int? = nil
 
     private var filteredApps: [InstalledUserApp] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -907,6 +910,7 @@ struct RemoteCallLabView: View {
             appSwitchingSection
             armSection
             stableCallSection
+            keychainSection
             sessionSummarySection
         }
         .navigationTitle("RemoteCall Lab")
@@ -1278,6 +1282,112 @@ struct RemoteCallLabView: View {
                 Text(mgr.labReport)
                     .font(.system(.footnote, design: .monospaced))
                     .textSelection(.enabled)
+            }
+        }
+    }
+
+    private static let keychainClasses = [
+        "GenericPassword",
+        "InternetPassword",
+        "Certificate",
+        "Key",
+        "Identity",
+    ]
+
+    @ViewBuilder
+    private var keychainSection: some View {
+        Section(
+            header: HeaderLabel(text: "Keychain (Experimental)", icon: "key.fill"),
+            footer: Text("Remotely queries SecItemCopyMatching in the target process. Resolve the symbol first, then list items by class or fetch data for individual items.")
+        ) {
+            // Experiment 1: Resolve SecItemCopyMatching
+            Button("Resolve SecItemCopyMatching") {
+                mgr.runRemoteCallLabKeychainResolve()
+            }
+            .disabled(mgr.labRunning || !mgr.labArmed || mgr.labProc?.labSessionState.rawValue != 8)
+
+            HStack {
+                Text("SecItemCopyMatching")
+                Spacer()
+                if mgr.keychainSecItemAddress != 0 {
+                    Text("0x" + String(mgr.keychainSecItemAddress, radix: 16))
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(.green)
+                } else {
+                    Text("Not resolved")
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // Experiment 2: List items
+            Picker("Keychain Class", selection: $keychainSelectedClass) {
+                ForEach(Self.keychainClasses, id: \.self) { cls in
+                    Text(cls).tag(cls)
+                }
+            }
+
+            Toggle("Include kSecReturnData", isOn: $keychainReturnData)
+
+            Button("List Items") {
+                keychainSelectedFetchIndex = nil
+                mgr.keychainFetchResult = ""
+                mgr.runRemoteCallLabKeychainList(className: keychainSelectedClass, returnData: keychainReturnData)
+            }
+            .disabled(mgr.labRunning || !mgr.labArmed || mgr.keychainSecItemAddress == 0 || mgr.labProc?.labSessionState.rawValue != 8)
+
+            if !mgr.keychainListResult.isEmpty {
+                ForEach(Array(mgr.keychainListResult.enumerated()), id: \.offset) { idx, item in
+                    let desc = item["description"] as? String ?? "(unknown)"
+                    let itemIndex = (item["index"] as? NSNumber)?.intValue ?? idx
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("#\(itemIndex)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.accentColor)
+                            Spacer()
+                            // Experiment 3: Fetch data button (only when returnData was not included)
+                            if !keychainReturnData {
+                                Button("Fetch Data") {
+                                    keychainSelectedFetchIndex = itemIndex
+                                    mgr.runRemoteCallLabKeychainFetch(
+                                        itemAttrs: item,
+                                        className: mgr.keychainClassName
+                                    )
+                                }
+                                .disabled(mgr.labRunning || mgr.keychainSecItemAddress == 0)
+                                .font(.caption)
+                            }
+                        }
+                        Text(desc)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(6)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            // Fetch result display
+            if !mgr.keychainFetchResult.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Fetched Data")
+                            .font(.caption)
+                            .foregroundColor(.accentColor)
+                        if let idx = keychainSelectedFetchIndex {
+                            Text("(item #\(idx))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Text(mgr.keychainFetchResult)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .textSelection(.enabled)
+                }
+                .padding(.vertical, 4)
             }
         }
     }
