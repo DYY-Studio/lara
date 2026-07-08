@@ -216,19 +216,31 @@ struct KeychainView: View {
 
         DispatchQueue.global(qos: .userInitiated).async {
             if let proc = RemoteCall(process: app.executable, useMigFilterBypass: false) {
+
+                DispatchQueue.main.async {
+                    let ret = launch_app(app.bundleID)
+                    guard ret == 0 else {
+                        datareadingbid = nil
+                        self.datareadingbid = nil
+                        self.errormsg = "Could not launch app. Open it manually."
+                        return
+                    }
+                }
+
                 var sec_symbols = remote_sec_symbols()
                 if find_secitem_symbols(proc, &sec_symbols) {
-                    if let secitems = get_secitems(proc, &sec_symbols, .scGenericPassword, false) {
-                        laramgr.shared.logmsg("(keychain) fetched \(secitems.count) generic password item(s)")
-                        for (index, item) in secitems.prefix(3).enumerated() {
-                            laramgr.shared.logmsg("(keychain) item[\(index)] \(item)")
-                        }
-                        if secitems.count > 3 {
-                            laramgr.shared.logmsg("(keychain) truncated \(secitems.count - 3) additional item(s)")
-                        }
-                    } else {
-                        laramgr.shared.logmsg("(keychain) failed to read generic password items")
-                    }
+                    // if let secitems = get_secitems(proc, &sec_symbols, .scGenericPassword, false) {
+                    //     laramgr.shared.logmsg("(keychain) fetched \(secitems.count) generic password item(s)")
+                    //     for (index, item) in secitems.prefix(3).enumerated() {
+                    //         laramgr.shared.logmsg("(keychain) item[\(index)] \(item)")
+                    //     }
+                    //     if secitems.count > 3 {
+                    //         laramgr.shared.logmsg("(keychain) truncated \(secitems.count - 3) additional item(s)")
+                    //     }
+                    // } else {
+                    //     laramgr.shared.logmsg("(keychain) failed to read generic password items")
+                    // }
+                    laramgr.shared.logmsg("(keychain) symbols \(sec_symbols)")
                 } else {
                     laramgr.shared.logmsg("(keychain) failed to resolve Security symbols")
                 }
@@ -237,6 +249,7 @@ struct KeychainView: View {
                     self.datareadingbid = nil
                 }
                 proc.destroy()
+                launch_app(Bundle.main.bundleIdentifier!)
             } else {
                 DispatchQueue.main.async {
                     self.datareadingbid = nil
