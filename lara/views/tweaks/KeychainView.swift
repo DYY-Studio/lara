@@ -215,18 +215,28 @@ struct KeychainView: View {
         laramgr.shared.logmsg("(keychain) reading \(app.bundleID)...")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let proc = RemoteCall(process: app.executable, useMigFilterBypass: false)
-            if proc != nil {
+            if let proc = RemoteCall(process: app.executable, useMigFilterBypass: false) {
                 var sec_symbols = remote_sec_symbols()
                 if find_secitem_symbols(proc, &sec_symbols) {
-                    let secitems = get_secitems(proc, &sec_symbols, .scGenericPassword, false)
-                    laramgr.shared.logmsg("(keychain) \(secitems)")
+                    if let secitems = get_secitems(proc, &sec_symbols, .scGenericPassword, false) {
+                        laramgr.shared.logmsg("(keychain) fetched \(secitems.count) generic password item(s)")
+                        for (index, item) in secitems.prefix(3).enumerated() {
+                            laramgr.shared.logmsg("(keychain) item[\(index)] \(item)")
+                        }
+                        if secitems.count > 3 {
+                            laramgr.shared.logmsg("(keychain) truncated \(secitems.count - 3) additional item(s)")
+                        }
+                    } else {
+                        laramgr.shared.logmsg("(keychain) failed to read generic password items")
+                    }
+                } else {
+                    laramgr.shared.logmsg("(keychain) failed to resolve Security symbols")
                 }
 
                 DispatchQueue.main.async {
                     self.datareadingbid = nil
                 }
-                proc?.destroy()
+                proc.destroy()
             } else {
                 DispatchQueue.main.async {
                     self.datareadingbid = nil
