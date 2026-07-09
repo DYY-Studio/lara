@@ -675,6 +675,23 @@ struct KeychainView: View {
 
     private func normalizeField(key: String, value: Any) -> KeychainFieldResult {
         if let data = value as? Data {
+            if data.isEmpty {
+                let exportValue: [String: Any] = [
+                    "type": "data",
+                    "byteCount": 0,
+                    "base64": "",
+                    "preview": "",
+                ]
+                return KeychainFieldResult(
+                    key: key,
+                    displayValue: "",
+                    detailText: "",
+                    searchText: "",
+                    isMonospaced: true,
+                    exportValue: exportValue
+                )
+            }
+
             if key.caseInsensitiveCompare("sha1") == .orderedSame {
                 let hex = hexString(data)
                 let exportValue: [String: Any] = [
@@ -1049,13 +1066,17 @@ private struct KeychainFieldRow: View {
         field.isMonospaced || field.detailText.contains("\n") || field.detailText.count > 90
     }
 
+    private var renderedText: String {
+        field.detailText.isEmpty ? "(empty)" : field.detailText
+    }
+
     var body: some View {
         if usesExpandedLayout {
             VStack(alignment: .leading, spacing: 6) {
                 Text(field.key)
                     .fontWeight(.medium)
 
-                Text(field.detailText)
+                Text(renderedText)
                     .font(field.isMonospaced ? .system(size: 13, design: .monospaced) : .body)
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
@@ -1063,7 +1084,7 @@ private struct KeychainFieldRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             LabeledContent(field.key) {
-                Text(field.detailText)
+                Text(renderedText)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
                     .textSelection(.enabled)
