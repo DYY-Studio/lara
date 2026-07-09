@@ -355,7 +355,10 @@ struct KeychainView: View {
     }
 
     private var resultsSection: some View {
-        Section(header: HeaderLabel(text: "Results", icon: "key.horizontal")) {
+        Section(
+            header: HeaderLabel(text: "Results", icon: "key.horizontal"),
+            footer: Text("Keychain Reader will switch to target app and then switch back 2 times. Generally, you do not need to take any action during this process.\n\nIf keep in progress, try manually switch to target app and then switch back to lara.")
+        ) {
             if let currentResult {
                 ForEach(currentResult.classResults) { classResult in
                     switch classResult.state {
