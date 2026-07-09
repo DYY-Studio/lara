@@ -439,13 +439,15 @@ struct KeychainView: View {
                 guard let contents = try? FileManager.default.contentsOfDirectory(atPath: appPath) else { continue }
                 for item in contents {
                     guard item.hasSuffix(".app") else { continue }
+                    guard isEligibleKeychainApp(at: appPath, bname: item) else { continue }
                     let fullAppPath = appPath + "/" + item
                     let infoPath = fullAppPath + "/Info.plist"
                     guard let info = NSDictionary(contentsOfFile: infoPath) else { continue }
-
+0
                     let executable = info["CFBundleExecutable"] as? String ?? ""
                     if executable.isEmpty { continue }
                     let bundleid = info["CFBundleIdentifier"] as? String ?? ""
+                    if bundleid != nil && bundleid == Bundle.main.bundleIdentifier { continue }
                     let name = (info["CFBundleDisplayName"] as? String) ??
                         (info["CFBundleName"] as? String) ??
                         (item as NSString).deletingPathExtension
@@ -478,6 +480,10 @@ struct KeychainView: View {
                 self.isLoadingApps = false
             }
         }
+    }
+
+    private func isEligibleKeychainApp(at containerPath: String, bname bundleName: String) -> Bool {
+        FileManager.default.fileExists(atPath: containerPath + "/" + bundleName + "/embedded.mobileprovision") || FileManager.default.fileExists(atPath: containerPath + "/iTunesMetadata.plist")
     }
 
     private func startRead(_ app: KeychainApp) {
