@@ -227,20 +227,21 @@ struct KeychainView: View {
                     }
                 }
 
+                usleep(500000)
+
                 var sec_symbols = remote_sec_symbols()
                 if find_secitem_symbols(proc, &sec_symbols) {
-                    // if let secitems = get_secitems(proc, &sec_symbols, .scGenericPassword, false) {
-                    //     laramgr.shared.logmsg("(keychain) fetched \(secitems.count) generic password item(s)")
-                    //     for (index, item) in secitems.prefix(3).enumerated() {
-                    //         laramgr.shared.logmsg("(keychain) item[\(index)] \(item)")
-                    //     }
-                    //     if secitems.count > 3 {
-                    //         laramgr.shared.logmsg("(keychain) truncated \(secitems.count - 3) additional item(s)")
-                    //     }
-                    // } else {
-                    //     laramgr.shared.logmsg("(keychain) failed to read generic password items")
-                    // }
-                    laramgr.shared.logmsg("(keychain) symbols \(sec_symbols)")
+                    if let secitems = get_secitems(proc, &sec_symbols, .scGenericPassword, false) {
+                        laramgr.shared.logmsg("(keychain) fetched \(secitems.count) generic password item(s)")
+                        for (index, item) in secitems.prefix(3).enumerated() {
+                            laramgr.shared.logmsg("(keychain) item[\(index)] \(item)")
+                        }
+                        if secitems.count > 3 {
+                            laramgr.shared.logmsg("(keychain) truncated \(secitems.count - 3) additional item(s)")
+                        }
+                    } else {
+                        laramgr.shared.logmsg("(keychain) failed to read generic password items")
+                    }
                 } else {
                     laramgr.shared.logmsg("(keychain) failed to resolve Security symbols")
                 }
