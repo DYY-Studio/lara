@@ -319,7 +319,10 @@ struct KeychainView: View {
     }
 
     private var currentResultSection: some View {
-        Section(header: HeaderLabel(text: "Current Result", icon: "tray.full")) {
+        Section(
+            header: HeaderLabel(text: "Current Result", icon: "tray.full"),
+            footer: Text("Keychain reading relies on RemoteCall and exploit state. It may be unstable and can fail, return incomplete results or make app crash.")
+        ) {
             if let currentResult {
                 LabeledContent("App") {
                     Text(currentResult.app.name)
@@ -482,8 +485,16 @@ struct KeychainView: View {
             errormsg = "Darksword not ready. Run the exploit first."
             return
         }
+        guard mgr.hasOffsets else {
+            errormsg = "Offsets not ready. Fetch the kernelcache offsets first."
+            return
+        }
         guard mgr.sbxready else {
             errormsg = "Sandbox escape not ready."
+            return
+        }
+        guard !app.executable.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errormsg = "App executable is missing."
             return
         }
 
@@ -514,16 +525,22 @@ struct KeychainView: View {
         }
     }
 
-    private func attemptPendingRead(reportFailure: Bool) {
+    private func attemptPendingRead(reportFailure _: Bool) {
         guard let app = pendingread else { return }
-        let pid = find_process_pid(app.executable)
-        guard pid > 0 else {
-            if reportFailure {
-                pendingread = nil
-                datareadingbid = nil
-                errormsg = "Process not found after launch. Try manually."
-                endLaunchBackgroundTask()
-            }
+
+        guard mgr.dsready, mgr.hasOffsets, mgr.sbxready else {
+            pendingread = nil
+            datareadingbid = nil
+            errormsg = "Exploit state changed. Reinitialize and try again."
+            endLaunchBackgroundTask()
+            return
+        }
+
+        guard !app.executable.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            pendingread = nil
+            datareadingbid = nil
+            errormsg = "App executable is missing."
+            endLaunchBackgroundTask()
             return
         }
 
@@ -533,6 +550,12 @@ struct KeychainView: View {
     }
 
     private func doRead(_ app: KeychainApp) {
+        guard mgr.dsready, mgr.hasOffsets, mgr.sbxready else {
+            datareadingbid = nil
+            errormsg = "Exploit state changed. Reinitialize and try again."
+            return
+        }
+
         laramgr.shared.logmsg("(keychain) reading \(app.bundleID)...")
 
         DispatchQueue.global(qos: .userInitiated).async {
